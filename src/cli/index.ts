@@ -1,0 +1,280 @@
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { ZodError } from "zod";
+
+import { loadConfig, writeDefaultConfig } from "../config/load.js";
+import { ModelpatrolError } from "../core/errors.js";
+import type { CliResult } from "../core/model.js";
+import { resolveHome } from "../infra/paths.js";
+import { detachStart, runningPid, stopProcess, writePid } from "../infra/process.js";
+import { readEvents } from "../ledger/store.js";
+import { snapshotAll } from "../ledger/windows.js";
+import { startProxy } from "../proxy/server.js";
+import { planHasKey, resolveRoute } from "../routing/resolve.js";
+import { flags, optionalHome } from "./args.js";
+
+const VERSION = readPackageVersion();
+
+function readPackageVersion(): string {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "package.json"),
+        "utf8",
+      ),
+    ) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.0.0";
+  }
+}
+
+const USAGE = `modelpatrol ${VERSION}
+
+Usage:
+  modelpatrol <command> [flags]
+
+Commands:
+  init                 Write the default config under --home
+  doctor               Check config, plan keys, and process state
+  start                Start the local proxy
+  stop                 Stop a detached proxy
+  status               Show process and listen address
+  usage                Print rolling 5h / 7d / 30d windows
+  resolve --intent ID  Show the plan and model for an intent
+  env --intent ID      Print harness environment exports
+
+Options:
+  --home DIR           State directory (default: ~/.modelpatrol)
+  --host HOST          Bind address for start
+  --port PORT          Bind port for start
+  --detach             Start in the background
+  --intent ID          Intent id for resolve/env
+  --help, -h           Show this help
+  --version, -v        Print the version
+`;
+
+export async function runCli(argv: string[]): Promise<CliResult> {
+  try {
+    return await dispatch(argv.slice(2));
+  } catch (err) {
+    if (err instanceof ModelpatrolError) {
+      return fail(err.exitCode, err.code, err.message);
+    }
+    if (err instanceof ZodError) {
+      return fail(2, "USAGE", err.issues.map((i) => i.message).join("; "));
+    }
+    return fail(1, "INTERNAL", err instanceof Error ? err.message : "internal error");
+  }
+}
+
+async function dispatch(args: string[]): Promise<CliResult> {
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    return ok(USAGE);
+  }
+  if (args.includes("--version") || args.includes("-v")) {
+    return ok(`${VERSION}\n`);
+  }
+  const [command, ...rest] = args;
+  if (!command) {
+    return ok(USAGE);
+  }
+  const opts = flags(rest);
+  switch (command) {
+    case "init":
+      return runInit(opts);
+    case "doctor":
+      return runDoctor(opts);
+    case "start":
+      return runStart(opts);
+    case "stop":
+      return runStop(opts);
+    case "status":
+      return runStatus(opts);
+    case "usage":
+      return runUsage(opts);
+    case "resolve":
+      return runResolve(opts);
+    case "env":
+      return runEnv(opts);
+    default:
+      throw new ModelpatrolError("USAGE", `unknown command: ${command}`);
+  }
+}
+
+function runInit(opts: Map<string, string>): CliResult {
+  const result = writeDefaultConfig(optionalHome(opts));
+  return okJson({
+    ok: true,
+    created: result.created,
+    home: result.home,
+    path: result.path,
+  });
+}
+
+function runDoctor(opts: Map<string, string>): CliResult {
+  const home = resolveHome(optionalHome(opts));
+  const loaded = loadConfig(home);
+  const plans = Object.values(loaded.config.plans).map((plan) => ({
+    id: plan.id,
+    authenticated: planHasKey(plan),
+    authEnv: plan.authEnv,
+  }));
+  const missing = plans.filter((plan) => !plan.authenticated).map((plan) => plan.id);
+  const pid = runningPid(home);
+  return okJson({
+    ok: true,
+    home,
+    configPath: loaded.path,
+    running: pid !== null,
+    pid,
+    plans,
+    missingKeys: missing,
+    intents: Object.keys(loaded.config.intents),
+  });
+}
+
+async function runStart(opts: Map<string, string>): Promise<CliResult> {
+  const home = resolveHome(optionalHome(opts));
+  mkdirSync(home, { recursive: true });
+  const existing = runningPid(home);
+  if (existing !== null && existing !== process.pid) {
+    throw new ModelpatrolError(
+      "PROXY_ALREADY_RUNNING",
+      `modelpatrol already running as pid ${existing}`,
+    );
+  }
+  const loaded = loadConfig(home);
+  const host = opts.get("--host") ?? loaded.config.host;
+  const portRaw = opts.get("--port");
+  const port = portRaw ? Number(portRaw) : loaded.config.port;
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new ModelpatrolError("USAGE", "invalid --port");
+  }
+  if (opts.get("--detach") === "true") {
+    const bin = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "bin",
+      "modelpatrol.js",
+    );
+    const childArgv = [
+      bin,
+      "start",
+      "--home",
+      home,
+      "--host",
+      host,
+      "--port",
+      String(port),
+    ];
+    const pid = detachStart(childArgv);
+    return okJson({ ok: true, detached: true, pid, host, port, home });
+  }
+  const handle = await startProxy({ home, config: loaded.config, host, port });
+  writePid(home, process.pid);
+  const payload = {
+    ok: true,
+    detached: false,
+    pid: process.pid,
+    host: handle.host,
+    port: handle.port,
+    home,
+  };
+  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  await new Promise<void>((resolve) => {
+    const stop = () => {
+      void handle.close().finally(() => resolve());
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+  return { exitCode: 0, stdout: "", stderr: "" };
+}
+
+function runStop(opts: Map<string, string>): CliResult {
+  const home = resolveHome(optionalHome(opts));
+  const result = stopProcess(home);
+  return okJson({ ok: true, pid: result.pid, home });
+}
+
+function runStatus(opts: Map<string, string>): CliResult {
+  const home = resolveHome(optionalHome(opts));
+  const loaded = loadConfig(home);
+  const pid = runningPid(home);
+  return okJson({
+    ok: true,
+    running: pid !== null,
+    pid,
+    host: loaded.config.host,
+    port: loaded.config.port,
+    home,
+  });
+}
+
+function runUsage(opts: Map<string, string>): CliResult {
+  const home = resolveHome(optionalHome(opts));
+  return okJson({
+    generatedAt: new Date().toISOString(),
+    home,
+    windows: snapshotAll(readEvents(home)),
+  });
+}
+
+function runResolve(opts: Map<string, string>): CliResult {
+  const intent = opts.get("--intent");
+  if (!intent) {
+    throw new ModelpatrolError("USAGE", "missing --intent");
+  }
+  const loaded = loadConfig(optionalHome(opts));
+  const route = resolveRoute(loaded.config, intent);
+  return okJson({
+    intent: route.intent,
+    plan: route.plan.id,
+    model: route.model,
+    protocol: route.plan.protocol,
+    baseUrl: route.plan.baseUrl,
+    fallbacks: route.fallbacks.map((item) => ({
+      plan: item.plan.id,
+      model: item.model,
+    })),
+  });
+}
+
+function runEnv(opts: Map<string, string>): CliResult {
+  const intent = opts.get("--intent");
+  if (!intent) {
+    throw new ModelpatrolError("USAGE", "missing --intent");
+  }
+  const loaded = loadConfig(optionalHome(opts));
+  const route = resolveRoute(loaded.config, intent);
+  const base = `http://${loaded.config.host}:${loaded.config.port}`;
+  const lines = [
+    `export OPENAI_BASE_URL=${base}/v1`,
+    `export ANTHROPIC_BASE_URL=${base}`,
+    "export OPENAI_API_KEY=modelpatrol",
+    "export ANTHROPIC_API_KEY=modelpatrol",
+    `export MODELPATROL_INTENT=${route.intent}`,
+  ];
+  return ok(`${lines.join("\n")}\n`);
+}
+
+function ok(stdout: string): CliResult {
+  return { exitCode: 0, stdout, stderr: "" };
+}
+
+function okJson(payload: unknown): CliResult {
+  return ok(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function fail(exitCode: number, code: string, message: string): CliResult {
+  return {
+    exitCode,
+    stdout: "",
+    stderr: `${JSON.stringify({ error: code, message })}\n`,
+  };
+}

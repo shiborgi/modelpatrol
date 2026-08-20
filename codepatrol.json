@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "verification": {
+    "argv": ["npm", "run", "verify"],
+    "timeoutMs": 180000
+  },
+  "remote": {
+    "enabled": true,
+    "gitRemote": "origin",
+    "tokenEnv": "GH_TOKEN",
+    "pushOnShip": true,
+    "wiki": true,
+    "milestones": true,
+    "issues": true
+  }
+}
