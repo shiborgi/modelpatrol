@@ -315,6 +315,7 @@ async function runUsage(opts: Map<string, string>, deps: CliDeps): Promise<CliRe
       provider: usage.provider,
       generatedAt: new Date().toISOString(),
       windows: usage.windows,
+      ...(usage.resets ? { resets: usage.resets } : {}),
     });
   }
   return okJson({

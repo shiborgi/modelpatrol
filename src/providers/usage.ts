@@ -1,3 +1,6 @@
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { CATALOG, providerPlan, requireProvider } from "../catalog/catalog.js";
 import { ModelpatrolError } from "../core/errors.js";
 import { resolvePlanKey } from "../routing/resolve.js";
@@ -8,6 +11,7 @@ export interface UsageWindowAvailable {
   used: number | null;
   remaining: number | null;
   limit: number | null;
+  resetAt?: string;
 }
 
 export type UsageWindowMissingReason = "unsupported" | "unauthenticated" | "upstream";
@@ -19,6 +23,12 @@ export interface UsageWindowMissing {
 
 export type UsageWindow = UsageWindowAvailable | UsageWindowMissing;
 
+export interface ProviderUsageReset {
+  id: string;
+  resetAt: string;
+  kind: "rate_limit";
+}
+
 export interface ProviderUsage {
   provider: string;
   windows: {
@@ -26,6 +36,7 @@ export interface ProviderUsage {
     week: UsageWindow;
     month: UsageWindow;
   };
+  resets?: ProviderUsageReset[];
 }
 
 export interface UsageDeps {
@@ -86,7 +97,43 @@ export async function openaiUsage(deps: UsageDeps): Promise<ProviderUsage> {
 
 export async function xaiUsage(_deps: UsageDeps): Promise<ProviderUsage> {
   const provider = requireProvider(CATALOG, "xai");
-  return unavailable(provider.id, "unsupported");
+  const fetchImpl = _deps.fetchImpl ?? fetch;
+  const plan = providerPlan(provider);
+  let key: string;
+  try {
+    key = await resolvePlanKey(plan, _deps.env ?? process.env, _deps.home);
+  } catch (error) {
+    if (error instanceof ModelpatrolError && error.code === "PLAN_UNAUTHENTICATED") {
+      return unavailable(provider.id, "unsupported");
+    }
+    throw error;
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(joinUrl(plan.baseUrl, "/models"), {
+      headers: { authorization: `Bearer ${key}` },
+    });
+  } catch {
+    return unavailable(provider.id, "upstream");
+  }
+  if (response.status === 401) return unavailable(provider.id, "unauthenticated");
+  if (!response.ok) return unavailable(provider.id, "upstream");
+  const resets = [
+    rateLimitReset(
+      "requests",
+      response.headers.get("x-ratelimit-reset-requests"),
+      response.headers.get("x-ratelimit-remaining-requests"),
+    ),
+    rateLimitReset(
+      "tokens",
+      response.headers.get("x-ratelimit-reset-tokens"),
+      response.headers.get("x-ratelimit-remaining-tokens"),
+    ),
+  ].filter((value): value is ProviderUsageReset => value !== null);
+  return {
+    ...unavailable(provider.id, "unsupported"),
+    ...(resets.length > 0 ? { resets } : {}),
+  };
 }
 
 export type ProviderUsageAdapter = (deps: UsageDeps) => Promise<ProviderUsage>;
@@ -104,7 +151,9 @@ export async function fetchProviderUsage(
   if (!adapter) {
     throw new ModelpatrolError("PROVIDER_UNKNOWN", `unknown provider "${providerId}"`);
   }
-  return adapter(deps);
+  const usage = await adapter(deps);
+  persistResets(deps.home, usage);
+  return usage;
 }
 
 function inferOpenaiWindows(payload: unknown): ProviderUsage["windows"] {
@@ -123,7 +172,93 @@ function bucketWindow(value: unknown): UsageWindow {
   if (!Number.isFinite(n)) {
     return { available: false, reason: "unsupported" };
   }
-  return { available: true, used: n, remaining: null, limit: null };
+  const remaining = numberOrNull(rec.remaining);
+  const limit = numberOrNull(rec.limit ?? rec.max);
+  const resetAt = exhaustedResetAt(rec, remaining, limit);
+  return {
+    available: true,
+    used: n,
+    remaining,
+    limit,
+    ...(resetAt ? { resetAt } : {}),
+  };
+}
+
+function exhaustedResetAt(
+  value: Record<string, unknown>,
+  remaining: number | null,
+  limit: number | null,
+): string | null {
+  if (
+    remaining !== 0 &&
+    !(limit !== null && nFinite(value.used) && Number(value.used) >= limit)
+  ) {
+    return null;
+  }
+  const raw = value.resetAt ?? value.reset_at ?? value.resetsAt ?? value.resets_at;
+  const date = new Date(typeof raw === "number" ? raw * 1000 : String(raw ?? ""));
+  return Number.isFinite(date.getTime()) && date.getTime() > Date.now()
+    ? date.toISOString()
+    : null;
+}
+
+function rateLimitReset(
+  id: string,
+  raw: string | null,
+  remainingRaw: string | null,
+): ProviderUsageReset | null {
+  if (!raw || remainingRaw === null || Number(remainingRaw) > 0) return null;
+  const numeric = Number(raw);
+  const now = Date.now();
+  const milliseconds = Number.isFinite(numeric)
+    ? numeric > 1_000_000_000_000
+      ? numeric
+      : numeric > 1_000_000_000
+        ? numeric * 1000
+        : now + numeric * 1000
+    : Date.parse(raw);
+  if (!Number.isFinite(milliseconds) || milliseconds <= now) return null;
+  return { id, kind: "rate_limit", resetAt: new Date(milliseconds).toISOString() };
+}
+
+function persistResets(home: string | undefined, usage: ProviderUsage): void {
+  if (!home) return;
+  const windows = Object.entries(usage.windows).flatMap(([id, value]) =>
+    value.available && value.resetAt
+      ? [{ id, resetAt: value.resetAt, kind: "usage_window" }]
+      : [],
+  );
+  const resets = [...windows, ...(usage.resets ?? [])];
+  if (resets.length === 0) return;
+  const path = join(home, "usage-resets.json");
+  try {
+    const previous = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const next = { ...previous, [usage.provider]: resets };
+    writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+    chmodSync(path, 0o600);
+  } catch {
+    try {
+      writeFileSync(
+        path,
+        `${JSON.stringify({ [usage.provider]: resets }, null, 2)}\n`,
+        {
+          mode: 0o600,
+        },
+      );
+      chmodSync(path, 0o600);
+    } catch {
+      return;
+    }
+  }
+}
+
+function numberOrNull(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function nFinite(value: unknown): boolean {
+  return Number.isFinite(Number(value));
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
