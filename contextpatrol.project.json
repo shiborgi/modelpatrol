@@ -1,0 +1,4 @@
+{
+  "includePaths": ["src/", "docs/"],
+  "excludePaths": ["docs/initiatives/", "docs/plans/"]
+}

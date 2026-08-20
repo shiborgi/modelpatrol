@@ -7,7 +7,7 @@
   "remote": {
     "enabled": true,
     "gitRemote": "origin",
-    "tokenEnv": "GH_TOKEN",
+    "tokenEnv": "GITHUB_TOKEN",
     "pushOnShip": true,
     "wiki": true,
     "milestones": true,
