@@ -15,6 +15,7 @@ import { resolveHome } from "../infra/paths.js";
 import { detachStart, runningPid, stopProcess, writePid } from "../infra/process.js";
 import { readEvents } from "../ledger/store.js";
 import { snapshotAll } from "../ledger/windows.js";
+import { fetchProviderUsage } from "../providers/usage.js";
 import { startProxy } from "../proxy/server.js";
 import { planHasKey, resolveRoute } from "../routing/resolve.js";
 import { flags, optionalHome } from "./args.js";
@@ -49,7 +50,7 @@ Commands:
   start                Start the local proxy
   stop                 Stop a detached proxy
   status               Show process and listen address
-  usage                Print rolling 5h / 7d / 30d windows
+  usage [--provider ID]  Print usage windows (local or from a provider)
   resolve              Show targets for --intent or --provider/--model
   env                  Print harness exports for --intent or --provider/--model
 
@@ -139,7 +140,7 @@ async function dispatch(args: string[], deps: CliDeps): Promise<CliResult> {
     case "status":
       return runStatus(opts);
     case "usage":
-      return runUsage(opts);
+      return runUsage(opts, deps);
     case "catalog":
       return runCatalog();
     case "resolve":
@@ -292,8 +293,24 @@ function runStatus(opts: Map<string, string>): CliResult {
   });
 }
 
-function runUsage(opts: Map<string, string>): CliResult {
+async function runUsage(opts: Map<string, string>, deps: CliDeps): Promise<CliResult> {
   const home = resolveHome(optionalHome(opts));
+  const provider = opts.get("--provider");
+  if (provider) {
+    if (!(provider in CATALOG)) {
+      throw new ModelpatrolError("USAGE", `unknown provider "${provider}"`);
+    }
+    const usage = await fetchProviderUsage(provider, {
+      fetchImpl: deps.fetchImpl,
+      env: process.env,
+      home,
+    });
+    return okJson({
+      provider: usage.provider,
+      generatedAt: new Date().toISOString(),
+      windows: usage.windows,
+    });
+  }
   return okJson({
     generatedAt: new Date().toISOString(),
     home,

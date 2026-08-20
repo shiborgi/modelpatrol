@@ -124,6 +124,11 @@ export function resolveCatalogRoute(
   };
 }
 
+/** Build a PlanDefinition-shaped seam from a provider's credential fields. */
+export function providerPlan(provider: CatalogProvider): PlanDefinition {
+  return catalogToPlan(provider, provider.models[0]?.id ?? "");
+}
+
 function catalogToPlan(provider: CatalogProvider, modelId: string): PlanDefinition {
   return {
     id: provider.id,

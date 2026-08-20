@@ -391,3 +391,84 @@ test("help lists catalog and the new resolve/env flags", async () => {
   assert.match(help.stdout, /--level ID/);
   assert.match(help.stdout, /--intent ID/);
 });
+
+test("usage --provider returns provider windows via the injected fetch", async () => {
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-cli-"));
+  await runCli(["node", "modelpatrol", "init", "--home", home]);
+  const prev = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "sk-cli";
+  try {
+    const usage = await runCli(
+      ["node", "modelpatrol", "usage", "--provider", "openai", "--home", home],
+      {
+        fetchImpl: async (input) => {
+          assert.match(String(input), /organization\/usage\/completions/);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ result: { week: { used: 10 }, month: { used: 40 } } }),
+            text: async () => "",
+            headers: new Headers(),
+          } as Response;
+        },
+      },
+    );
+    assert.equal(usage.exitCode, 0);
+    const payload = JSON.parse(usage.stdout) as {
+      provider: string;
+      windows: {
+        fiveHour: { available: boolean };
+        week: { available: boolean; used?: number };
+      };
+    };
+    assert.equal(payload.provider, "openai");
+    assert.equal(payload.windows.fiveHour.available, false);
+    assert.equal(payload.windows.week.available, true);
+    assert.equal(payload.windows.week.used, 10);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = prev;
+    }
+  }
+});
+
+test("usage --provider with an unknown provider is USAGE", async () => {
+  const result = await runCli(["node", "modelpatrol", "usage", "--provider", "nope"]);
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /USAGE/);
+});
+
+test("usage --provider surfaces PLAN_UNAUTHENTICATED as exit 1", async () => {
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-cli-"));
+  await runCli(["node", "modelpatrol", "init", "--home", home]);
+  const prev = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  const prevCodex = process.env.CODEX_API_KEY;
+  delete process.env.CODEX_API_KEY;
+  try {
+    const result = await runCli([
+      "node",
+      "modelpatrol",
+      "usage",
+      "--provider",
+      "openai",
+      "--home",
+      home,
+    ]);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /PLAN_UNAUTHENTICATED/);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = prev;
+    }
+    if (prevCodex === undefined) {
+      delete process.env.CODEX_API_KEY;
+    } else {
+      process.env.CODEX_API_KEY = prevCodex;
+    }
+  }
+});
