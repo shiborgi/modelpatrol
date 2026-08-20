@@ -80,7 +80,7 @@ test("connect and disconnect USAGE and successful disconnect", async () => {
   assert.equal(noPlan.exitCode, 2);
   assert.match(noPlan.stderr, /USAGE/);
 
-  const badPlan = await runCli(["node", "modelpatrol", "connect", "--plan", "codex"]);
+  const badPlan = await runCli(["node", "modelpatrol", "connect", "--plan", "unknown"]);
   assert.equal(badPlan.exitCode, 2);
   assert.match(badPlan.stderr, /USAGE/);
 
@@ -89,7 +89,7 @@ test("connect and disconnect USAGE and successful disconnect", async () => {
     "modelpatrol",
     "disconnect",
     "--plan",
-    "codex",
+    "unknown",
   ]);
   assert.equal(badDisconnect.exitCode, 2);
 
@@ -471,4 +471,81 @@ test("usage --provider surfaces PLAN_UNAUTHENTICATED as exit 1", async () => {
       process.env.CODEX_API_KEY = prevCodex;
     }
   }
+});
+
+test("connect and disconnect support Codex device auth", async () => {
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-codex-cli-"));
+  await runCli(["node", "modelpatrol", "init", "--home", home]);
+  const printed: string[] = [];
+  let poll = false;
+  let exchange = false;
+  const connected = await runCli(
+    [
+      "node",
+      "modelpatrol",
+      "connect",
+      "--plan",
+      "codex",
+      "--home",
+      home,
+      "--no-browser",
+    ],
+    {
+      writeStdout: (value) => printed.push(value),
+      sleep: async () => undefined,
+      fetchImpl: async (input) => {
+        if (String(input).includes("usercode")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              device_code: "dc",
+              user_code: "CODE-1",
+              expires_in: 300,
+            }),
+            text: async () => "",
+            headers: new Headers(),
+          } as Response;
+        }
+        if (poll) exchange = true;
+        poll = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...(poll && exchange
+              ? { access_token: "codex-access" }
+              : { code: "codex-code" }),
+            refresh_token: "codex-refresh",
+            expires_in: 3600,
+          }),
+          text: async () => "",
+          headers: new Headers(),
+        } as Response;
+      },
+    },
+  );
+  assert.equal(connected.exitCode, 0);
+  assert.equal(poll, true);
+  assert.equal(exchange, true);
+  assert.equal(JSON.parse(printed[0] ?? "{}").plan, "codex");
+  assert.equal(JSON.parse(connected.stdout).plan, "codex");
+
+  const disconnected = await runCli([
+    "node",
+    "modelpatrol",
+    "disconnect",
+    "--plan",
+    "codex",
+    "--home",
+    home,
+  ]);
+  assert.equal(disconnected.exitCode, 0);
+  assert.equal(JSON.parse(disconnected.stdout).plan, "codex");
+});
+
+test("help warns about device-code phishing and lists Codex support", async () => {
+  const help = await runCli(["node", "modelpatrol", "--help"]);
+  assert.match(help.stdout, /codex or supergrok/);
+  assert.match(help.stdout, /Never share a device code/);
 });

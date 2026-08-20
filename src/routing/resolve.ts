@@ -1,3 +1,4 @@
+import { refreshAccessToken as refreshCodexAccessToken } from "../auth/codex-oauth.js";
 import { inspectCredential, readCredential, writeCredential } from "../auth/store.js";
 import { accessTokenIsExpiring, refreshAccessToken } from "../auth/xai-oauth.js";
 import { ModelpatrolError } from "../core/errors.js";
@@ -64,9 +65,14 @@ export async function resolvePlanKey(
           if (!promise) {
             promise = (async () => {
               try {
-                const refreshed = await refreshAccessToken(stored.refresh, {
-                  fetchImpl: options.fetchImpl,
-                });
+                const refreshed =
+                  oauthId === "codex"
+                    ? await refreshCodexAccessToken(stored.refresh, {
+                        fetchImpl: options.fetchImpl,
+                      })
+                    : await refreshAccessToken(stored.refresh, {
+                        fetchImpl: options.fetchImpl,
+                      });
                 const newExpires = Date.now() + (refreshed.expires_in ?? 3600) * 1000;
                 const newRefresh = refreshed.refresh_token || stored.refresh;
                 writeCredential(home, oauthId, {

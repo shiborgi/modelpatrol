@@ -11,6 +11,7 @@ export const DEFAULT_PLANS: Record<string, PlanDefinition> = {
     authEnvFallbacks: ["OPENAI_API_KEY"],
     defaultModel: "gpt-5.3-codex",
     extraHeaders: {},
+    oauthPlan: "codex",
   },
   zai: {
     id: "zai",

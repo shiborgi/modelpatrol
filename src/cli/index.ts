@@ -4,7 +4,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ZodError } from "zod";
-
+import type { CodexToken } from "../auth/codex-oauth.js";
+import {
+  exchangeToken as exchangeCodexToken,
+  pollDeviceCodeToken as pollCodexToken,
+  requestDeviceCode as requestCodexDeviceCode,
+} from "../auth/codex-oauth.js";
 import { deleteCredential, inspectCredential, writeCredential } from "../auth/store.js";
 import { pollDeviceCodeToken, requestDeviceCode } from "../auth/xai-oauth.js";
 import { CATALOG, resolveCatalogRoute } from "../catalog/catalog.js";
@@ -45,7 +50,7 @@ Commands:
   init                 Write the default config under --home
   doctor               Check config, plan keys, and process state
   catalog              List providers, models, and their levels
-  connect --plan ID    Connect a plan (supergrok) via device authorization
+  connect --plan ID    Connect codex or supergrok via device authorization
   disconnect --plan ID Remove stored credential for a plan
   start                Start the local proxy
   stop                 Stop a detached proxy
@@ -67,6 +72,7 @@ Options:
   --level ID           Level (default|high|max) for resolve/env
   --help, -h           Show this help
   --version, -v        Print the version
+  Device codes are sensitive. Never share a device code.
 `;
 
 export interface CliDeps {
@@ -436,8 +442,11 @@ async function runConnect(
   if (!plan) {
     throw new ModelpatrolError("USAGE", "missing --plan");
   }
-  if (plan !== "supergrok") {
-    throw new ModelpatrolError("USAGE", "connect only supported for supergrok");
+  if (plan !== "supergrok" && plan !== "codex") {
+    throw new ModelpatrolError(
+      "USAGE",
+      "connect only supported for codex or supergrok",
+    );
   }
   const home = resolveHome(optionalHome(opts));
   const noBrowser = opts.get("--no-browser") === "true";
@@ -445,7 +454,10 @@ async function runConnect(
     deps.writeStdout ?? ((text: string) => process.stdout.write(text));
   const openBrowser = deps.openBrowser ?? defaultOpenBrowser;
 
-  const device = await requestDeviceCode({ fetchImpl: deps.fetchImpl });
+  const device =
+    plan === "codex"
+      ? await requestCodexDeviceCode({ fetchImpl: deps.fetchImpl })
+      : await requestDeviceCode({ fetchImpl: deps.fetchImpl });
   const first = {
     plan,
     verificationUri: device.verification_uri,
@@ -461,16 +473,28 @@ async function runConnect(
     }
   }
 
-  const token = await pollDeviceCodeToken(device, {
-    fetchImpl: deps.fetchImpl,
-    sleep: deps.sleep,
-  });
-  const expires = Date.now() + (token.expires_in ?? 3600) * 1000;
+  const token =
+    plan === "codex"
+      ? await pollCodexToken(device, { fetchImpl: deps.fetchImpl, sleep: deps.sleep })
+      : await pollDeviceCodeToken(device, {
+          fetchImpl: deps.fetchImpl,
+          sleep: deps.sleep,
+        });
+  const exchanged =
+    plan === "codex"
+      ? await exchangeCodexToken(
+          (token as CodexToken).authorization_code ??
+            (token as CodexToken).code ??
+            (token as CodexToken).access_token,
+          { fetchImpl: deps.fetchImpl },
+        )
+      : token;
+  const expires = Date.now() + (exchanged.expires_in ?? 3600) * 1000;
   writeCredential(home, plan, {
-    access: token.access_token,
-    refresh: token.refresh_token || "",
+    access: exchanged.access_token,
+    refresh: exchanged.refresh_token || "",
     expires,
-    tokenType: token.token_type,
+    tokenType: exchanged.token_type,
   });
   return okJson({ ok: true, plan, expires });
 }
@@ -480,8 +504,11 @@ function runDisconnect(opts: Map<string, string>): CliResult {
   if (!plan) {
     throw new ModelpatrolError("USAGE", "missing --plan");
   }
-  if (plan !== "supergrok") {
-    throw new ModelpatrolError("USAGE", "disconnect only supported for supergrok");
+  if (plan !== "supergrok" && plan !== "codex") {
+    throw new ModelpatrolError(
+      "USAGE",
+      "disconnect only supported for codex or supergrok",
+    );
   }
   const home = resolveHome(optionalHome(opts));
   deleteCredential(home, plan);
