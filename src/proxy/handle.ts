@@ -121,6 +121,7 @@ export async function handleHttp(
       protocol: route.plan.protocol,
       stream: streamed,
       env: ctx.env,
+      home: ctx.home,
       fetchImpl: ctx.fetchImpl,
     });
     const usage = streamed

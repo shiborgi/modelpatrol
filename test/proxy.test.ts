@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { writeCredential } from "../src/auth/store.js";
 import { defaultConfig } from "../src/config/defaults.js";
 import { readEvents } from "../src/ledger/store.js";
 import { startProxy } from "../src/proxy/server.js";
@@ -13,10 +14,13 @@ async function listenMock(): Promise<{
   url: string;
   close: () => Promise<void>;
   bodies: unknown[];
+  authorizations: string[];
 }> {
   const bodies: unknown[] = [];
+  const authorizations: string[] = [];
   const server = createServer((req, res) => {
     const chunks: Buffer[] = [];
+    authorizations.push(String(req.headers.authorization ?? ""));
     req.on("data", (chunk) => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
@@ -42,6 +46,7 @@ async function listenMock(): Promise<{
   return {
     url: `http://127.0.0.1:${port}/v1`,
     bodies,
+    authorizations,
     close: () =>
       new Promise((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
@@ -114,5 +119,45 @@ test("GET /health and /v1/usage are local and keyless", async () => {
     assert.equal(body.windows.length, 3);
   } finally {
     await handle.close();
+  }
+});
+
+test("proxy sends Bearer from stored SuperGrok oauth without env keys", async () => {
+  const mock = await listenMock();
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-oauth-proxy-"));
+  const config = defaultConfig();
+  const plan = config.plans.supergrok;
+  assert.ok(plan);
+  plan.baseUrl = mock.url;
+  writeCredential(home, "supergrok", {
+    access: "stored-oauth",
+    refresh: "r",
+    expires: Date.now() + 1_000_000,
+  });
+  const handle = await startProxy({
+    home,
+    config,
+    host: "127.0.0.1",
+    port: 0,
+    ctx: { env: {} },
+  });
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "build-review",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-modelpatrol-plan"), "supergrok");
+    assert.equal(mock.authorizations[0], "Bearer stored-oauth");
+  } finally {
+    await handle.close();
+    await mock.close();
   }
 });

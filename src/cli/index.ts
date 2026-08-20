@@ -1,9 +1,12 @@
+import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ZodError } from "zod";
 
+import { deleteCredential, inspectCredential, writeCredential } from "../auth/store.js";
+import { pollDeviceCodeToken, requestDeviceCode } from "../auth/xai-oauth.js";
 import { loadConfig, writeDefaultConfig } from "../config/load.js";
 import { ModelpatrolError } from "../core/errors.js";
 import type { CliResult } from "../core/model.js";
@@ -39,6 +42,8 @@ Usage:
 Commands:
   init                 Write the default config under --home
   doctor               Check config, plan keys, and process state
+  connect --plan ID    Connect a plan (supergrok) via device authorization
+  disconnect --plan ID Remove stored credential for a plan
   start                Start the local proxy
   stop                 Stop a detached proxy
   status               Show process and listen address
@@ -51,14 +56,45 @@ Options:
   --host HOST          Bind address for start
   --port PORT          Bind port for start
   --detach             Start in the background
+  --plan ID            Plan id for connect/disconnect
+  --no-browser         Do not open browser during connect
   --intent ID          Intent id for resolve/env
   --help, -h           Show this help
   --version, -v        Print the version
 `;
 
-export async function runCli(argv: string[]): Promise<CliResult> {
+export interface CliDeps {
+  fetchImpl?: typeof fetch;
+  openBrowser?: (url: string) => void;
+  writeStdout?: (text: string) => void;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export function defaultOpenBrowser(url: string): void {
+  const platform = process.platform;
+  let cmd: string;
+  let args: string[];
+  if (platform === "darwin") {
+    cmd = "open";
+    args = [url];
+  } else if (platform === "win32") {
+    cmd = "cmd";
+    args = ["/c", "start", "", url];
+  } else {
+    cmd = "xdg-open";
+    args = [url];
+  }
   try {
-    return await dispatch(argv.slice(2));
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+    child.unref();
+  } catch {
+    return;
+  }
+}
+
+export async function runCli(argv: string[], deps: CliDeps = {}): Promise<CliResult> {
+  try {
+    return await dispatch(argv.slice(2), deps);
   } catch (err) {
     if (err instanceof ModelpatrolError) {
       return fail(err.exitCode, err.code, err.message);
@@ -70,7 +106,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   }
 }
 
-async function dispatch(args: string[]): Promise<CliResult> {
+async function dispatch(args: string[], deps: CliDeps): Promise<CliResult> {
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     return ok(USAGE);
   }
@@ -87,6 +123,10 @@ async function dispatch(args: string[]): Promise<CliResult> {
       return runInit(opts);
     case "doctor":
       return runDoctor(opts);
+    case "connect":
+      return runConnect(opts, deps);
+    case "disconnect":
+      return runDisconnect(opts);
     case "start":
       return runStart(opts);
     case "stop":
@@ -117,11 +157,39 @@ function runInit(opts: Map<string, string>): CliResult {
 function runDoctor(opts: Map<string, string>): CliResult {
   const home = resolveHome(optionalHome(opts));
   const loaded = loadConfig(home);
-  const plans = Object.values(loaded.config.plans).map((plan) => ({
-    id: plan.id,
-    authenticated: planHasKey(plan),
-    authEnv: plan.authEnv,
-  }));
+  const errors: Array<{ plan: string; code: string }> = [];
+  const plans = Object.values(loaded.config.plans).map((plan) => {
+    const hasEnv = planHasKey(plan, process.env);
+    let authSource: "env" | "oauth" | "missing" = "missing";
+    let authenticated = false;
+    let error: string | undefined;
+
+    if (plan.id === "supergrok") {
+      const inspected = inspectCredential(home, "supergrok");
+      if (inspected.status === "invalid") {
+        error = "CONFIG_INVALID";
+        authSource = "missing";
+        authenticated = false;
+        errors.push({ plan: plan.id, code: "CONFIG_INVALID" });
+      } else if (hasEnv) {
+        authSource = "env";
+        authenticated = true;
+      } else if (inspected.status === "valid") {
+        authSource = "oauth";
+        authenticated = true;
+      }
+    } else {
+      authenticated = hasEnv;
+    }
+
+    return {
+      id: plan.id,
+      authenticated,
+      authEnv: plan.authEnv,
+      authSource: plan.id === "supergrok" ? authSource : undefined,
+      ...(error ? { error } : {}),
+    };
+  });
   const missing = plans.filter((plan) => !plan.authenticated).map((plan) => plan.id);
   const pid = runningPid(home);
   return okJson({
@@ -132,6 +200,7 @@ function runDoctor(opts: Map<string, string>): CliResult {
     pid,
     plans,
     missingKeys: missing,
+    errors,
     intents: Object.keys(loaded.config.intents),
   });
 }
@@ -261,6 +330,66 @@ function runEnv(opts: Map<string, string>): CliResult {
     `export MODELPATROL_INTENT=${route.intent}`,
   ];
   return ok(`${lines.join("\n")}\n`);
+}
+
+async function runConnect(
+  opts: Map<string, string>,
+  deps: CliDeps,
+): Promise<CliResult> {
+  const plan = opts.get("--plan");
+  if (!plan) {
+    throw new ModelpatrolError("USAGE", "missing --plan");
+  }
+  if (plan !== "supergrok") {
+    throw new ModelpatrolError("USAGE", "connect only supported for supergrok");
+  }
+  const home = resolveHome(optionalHome(opts));
+  const noBrowser = opts.get("--no-browser") === "true";
+  const writeStdout =
+    deps.writeStdout ?? ((text: string) => process.stdout.write(text));
+  const openBrowser = deps.openBrowser ?? defaultOpenBrowser;
+
+  const device = await requestDeviceCode({ fetchImpl: deps.fetchImpl });
+  const first = {
+    plan,
+    verificationUri: device.verification_uri,
+    userCode: device.user_code,
+  };
+  writeStdout(`${JSON.stringify(first)}\n`);
+
+  if (!noBrowser) {
+    try {
+      openBrowser(device.verification_uri_complete || device.verification_uri);
+    } catch {
+      void 0;
+    }
+  }
+
+  const token = await pollDeviceCodeToken(device, {
+    fetchImpl: deps.fetchImpl,
+    sleep: deps.sleep,
+  });
+  const expires = Date.now() + (token.expires_in ?? 3600) * 1000;
+  writeCredential(home, plan, {
+    access: token.access_token,
+    refresh: token.refresh_token || "",
+    expires,
+    tokenType: token.token_type,
+  });
+  return okJson({ ok: true, plan, expires });
+}
+
+function runDisconnect(opts: Map<string, string>): CliResult {
+  const plan = opts.get("--plan");
+  if (!plan) {
+    throw new ModelpatrolError("USAGE", "missing --plan");
+  }
+  if (plan !== "supergrok") {
+    throw new ModelpatrolError("USAGE", "disconnect only supported for supergrok");
+  }
+  const home = resolveHome(optionalHome(opts));
+  deleteCredential(home, plan);
+  return okJson({ ok: true, plan });
 }
 
 function ok(stdout: string): CliResult {

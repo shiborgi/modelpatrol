@@ -4,7 +4,7 @@ export function flags(args: string[]): Map<string, string> {
   const map = new Map<string, string>();
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] as string;
-    if (arg === "--detach") {
+    if (arg === "--detach" || arg === "--no-browser") {
       map.set(arg, "true");
       continue;
     }

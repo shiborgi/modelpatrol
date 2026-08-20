@@ -16,3 +16,7 @@ export function ledgerPath(home: string): string {
 export function pidPath(home: string): string {
   return join(home, "proxy.pid");
 }
+
+export function credentialPath(home: string, planId: string): string {
+  return join(home, "credentials", `${planId}.json`);
+}

@@ -18,10 +18,13 @@ export async function forwardJson(input: {
   protocol: Protocol;
   stream: boolean;
   env?: NodeJS.ProcessEnv;
+  home?: string;
   fetchImpl?: typeof fetch;
 }): Promise<UpstreamResult> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const key = resolvePlanKey(input.plan, input.env ?? process.env);
+  const key = await resolvePlanKey(input.plan, input.env ?? process.env, input.home, {
+    fetchImpl,
+  });
   const url = joinUrl(input.plan.baseUrl, input.path);
   const headers: Record<string, string> = {
     "content-type": "application/json",
