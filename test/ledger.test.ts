@@ -16,6 +16,8 @@ test("appendEvent then readEvents round-trips", () => {
     intent: "spec",
     plan: "kimi",
     model: "kimi-k2.5",
+    provider: null,
+    level: null,
     protocol: "openai",
     harness: "pi",
     promptTokens: 8,

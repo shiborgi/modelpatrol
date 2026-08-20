@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  applyReasoning,
   extractSseUsage,
   extractUsage,
   inboundProtocol,
@@ -53,4 +54,12 @@ test("extractSseUsage reads the last usage chunk", () => {
     "data: [DONE]",
   ].join("\n");
   assert.deepEqual(extractSseUsage(chunks), { promptTokens: 11, completionTokens: 7 });
+});
+
+test("applyReasoning injects reasoning_effort only when non-null", () => {
+  const body = { model: "grok-4.6", messages: [] };
+  assert.equal(applyReasoning(body, "high").reasoning_effort, "high");
+  assert.equal(applyReasoning(body, "xhigh").reasoning_effort, "xhigh");
+  assert.equal("reasoning_effort" in applyReasoning(body, null), false);
+  assert.equal("reasoning_effort" in applyReasoning(body, null), false);
 });

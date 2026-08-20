@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { writeCredential } from "../src/auth/store.js";
+import { CATALOG } from "../src/catalog/catalog.js";
 import { defaultConfig } from "../src/config/defaults.js";
 import { readEvents } from "../src/ledger/store.js";
 import { startProxy } from "../src/proxy/server.js";
@@ -157,6 +158,91 @@ test("proxy sends Bearer from stored SuperGrok oauth without env keys", async ()
     assert.equal(response.headers.get("x-modelpatrol-plan"), "supergrok");
     assert.equal(mock.authorizations[0], "Bearer stored-oauth");
   } finally {
+    await handle.close();
+    await mock.close();
+  }
+});
+
+test("proxy routes provider/model headers to the catalog with reasoning", async () => {
+  const mock = await listenMock();
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-catalog-proxy-"));
+  const xai = CATALOG.xai;
+  assert.ok(xai);
+  const original = xai.baseUrl;
+  xai.baseUrl = mock.url;
+  const handle = await startProxy({
+    home,
+    config: defaultConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    ctx: { env: { XAI_API_KEY: "xai-key" } },
+  });
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-modelpatrol-provider": "xai",
+          "x-modelpatrol-model": "grok-4.6",
+          "x-modelpatrol-level": "high",
+        },
+        body: JSON.stringify({
+          model: "anything",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-modelpatrol-provider"), "xai");
+    assert.equal(response.headers.get("x-modelpatrol-model"), "grok-4.6");
+    assert.equal(response.headers.get("x-modelpatrol-level"), "high");
+    const sent = mock.bodies[0] as { model: string; reasoning_effort: string };
+    assert.equal(sent.model, "grok-4.6");
+    assert.equal(sent.reasoning_effort, "high");
+    const events = readEvents(home);
+    assert.equal(events[0]?.provider, "xai");
+    assert.equal(events[0]?.level, "high");
+  } finally {
+    xai.baseUrl = original;
+    await handle.close();
+    await mock.close();
+  }
+});
+
+test("proxy routes body model slug and omits reasoning for default", async () => {
+  const mock = await listenMock();
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-catalog-slug-"));
+  const xai = CATALOG.xai;
+  assert.ok(xai);
+  const original = xai.baseUrl;
+  xai.baseUrl = mock.url;
+  const handle = await startProxy({
+    home,
+    config: defaultConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    ctx: { env: { XAI_API_KEY: "xai-key" } },
+  });
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "xai/grok-4.6",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      },
+    );
+    assert.equal(response.status, 200);
+    const sent = mock.bodies[0] as { model: string; reasoning_effort?: string };
+    assert.equal(sent.model, "grok-4.6");
+    assert.equal(sent.reasoning_effort, undefined);
+  } finally {
+    xai.baseUrl = original;
     await handle.close();
     await mock.close();
   }

@@ -59,6 +59,13 @@ export function rewriteResponseModel(payload: unknown, inboundModel: string): un
   return { ...(payload as JsonRecord), model: inboundModel };
 }
 
+export function applyReasoning(body: JsonRecord, reasoning: string | null): JsonRecord {
+  if (reasoning == null) {
+    return body;
+  }
+  return { ...body, reasoning_effort: reasoning };
+}
+
 export function extractUsage(payload: unknown): {
   promptTokens: number;
   completionTokens: number;

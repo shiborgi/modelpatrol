@@ -1,4 +1,4 @@
-import type { OnExceed, Protocol, WindowId } from "./constants.js";
+import type { LevelId, OnExceed, Protocol, WindowId } from "./constants.js";
 
 export interface PlanDefinition {
   id: string;
@@ -9,6 +9,36 @@ export interface PlanDefinition {
   authEnvFallbacks: string[];
   defaultModel: string;
   extraHeaders: Record<string, string>;
+  oauthPlan?: string;
+}
+
+export interface CatalogLevel {
+  id: LevelId;
+  reasoning: string | null;
+}
+
+export interface CatalogModel {
+  id: string;
+  levels: CatalogLevel[];
+}
+
+export interface CatalogProvider {
+  id: string;
+  label: string;
+  protocol: Protocol;
+  baseUrl: string;
+  authEnv: string;
+  authEnvFallbacks: string[];
+  oauthPlan?: string;
+  models: CatalogModel[];
+}
+
+export interface CatalogRoute {
+  provider: CatalogProvider;
+  model: CatalogModel;
+  level: LevelId;
+  reasoning: string | null;
+  plan: PlanDefinition;
 }
 
 export interface IntentFallback {
@@ -52,6 +82,8 @@ export interface LedgerEvent {
   intent: string;
   plan: string;
   model: string;
+  provider: string | null;
+  level: string | null;
   protocol: Protocol;
   harness: string | null;
   promptTokens: number;

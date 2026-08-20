@@ -281,3 +281,113 @@ test("doctor reports authSource and CONFIG_INVALID", async () => {
   assert.equal(sg?.authenticated, false);
   assert.equal(report.errors[0]?.code, "CONFIG_INVALID");
 });
+
+test("catalog prints providers, models, and levels", async () => {
+  const result = await runCli(["node", "modelpatrol", "catalog"]);
+  assert.equal(result.exitCode, 0);
+  const payload = JSON.parse(result.stdout) as {
+    providers: Array<{
+      id: string;
+      baseUrl: string;
+      models: Array<{
+        id: string;
+        levels: Array<{ id: string; reasoning: string | null }>;
+      }>;
+    }>;
+  };
+  const ids = payload.providers.map((p) => p.id);
+  assert.deepEqual(ids.sort(), ["openai", "xai"]);
+  const xai = payload.providers.find((p) => p.id === "xai");
+  assert.equal(xai?.baseUrl, "https://api.x.ai/v1");
+  assert.equal(xai?.models[0]?.id, "grok-4.6");
+  assert.equal(xai?.models[0]?.levels.find((l) => l.id === "high")?.reasoning, "high");
+});
+
+test("resolve --provider/--model/--level prints catalog route", async () => {
+  const result = await runCli([
+    "node",
+    "modelpatrol",
+    "resolve",
+    "--provider",
+    "xai",
+    "--model",
+    "grok-4.6",
+    "--level",
+    "high",
+  ]);
+  assert.equal(result.exitCode, 0);
+  const payload = JSON.parse(result.stdout) as {
+    provider: string;
+    model: string;
+    level: string;
+    reasoning: string | null;
+    baseUrl: string;
+  };
+  assert.equal(payload.provider, "xai");
+  assert.equal(payload.model, "grok-4.6");
+  assert.equal(payload.level, "high");
+  assert.equal(payload.reasoning, "high");
+  assert.equal(payload.baseUrl, "https://api.x.ai/v1");
+});
+
+test("resolve --provider without --model is USAGE", async () => {
+  const result = await runCli(["node", "modelpatrol", "resolve", "--provider", "xai"]);
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /USAGE/);
+});
+
+test("resolve unknown provider/model maps to typed errors", async () => {
+  const badProvider = await runCli([
+    "node",
+    "modelpatrol",
+    "resolve",
+    "--provider",
+    "nope",
+    "--model",
+    "grok-4.6",
+  ]);
+  assert.equal(badProvider.exitCode, 1);
+  assert.match(badProvider.stderr, /PROVIDER_UNKNOWN/);
+
+  const badModel = await runCli([
+    "node",
+    "modelpatrol",
+    "resolve",
+    "--provider",
+    "xai",
+    "--model",
+    "nope",
+  ]);
+  assert.equal(badModel.exitCode, 1);
+  assert.match(badModel.stderr, /MODEL_UNKNOWN/);
+});
+
+test("env --provider/--model includes provider exports", async () => {
+  const home = mkdtempSync(join(tmpdir(), "modelpatrol-cli-"));
+  await runCli(["node", "modelpatrol", "init", "--home", home]);
+  const env = await runCli([
+    "node",
+    "modelpatrol",
+    "env",
+    "--home",
+    home,
+    "--provider",
+    "openai",
+    "--model",
+    "gpt-5.6-luna",
+  ]);
+  assert.equal(env.exitCode, 0);
+  assert.match(env.stdout, /MODELPATROL_PROVIDER=openai/);
+  assert.match(env.stdout, /MODELPATROL_MODEL=gpt-5.6-luna/);
+  assert.match(env.stdout, /MODELPATROL_LEVEL=default/);
+  assert.match(env.stdout, /OPENAI_BASE_URL=/);
+});
+
+test("help lists catalog and the new resolve/env flags", async () => {
+  const help = await runCli(["node", "modelpatrol", "--help"]);
+  assert.match(help.stdout, /catalog/);
+  assert.match(help.stdout, /--provider ID/);
+  assert.match(help.stdout, /--model ID/);
+  assert.match(help.stdout, /--level ID/);
+  assert.match(help.stdout, /--intent ID/);
+});

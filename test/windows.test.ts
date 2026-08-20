@@ -17,6 +17,8 @@ function event(overrides: Partial<LedgerEvent>): LedgerEvent {
     intent: "build",
     plan: "codex",
     model: "gpt-5.3-codex",
+    provider: null,
+    level: null,
     protocol: "openai",
     harness: "opencode",
     promptTokens: 100,

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { CATALOG, resolveCatalogRoute } from "../catalog/catalog.js";
 import { loadConfig } from "../config/load.js";
 import { INTENT_HEADER } from "../core/constants.js";
 import { ModelpatrolError } from "../core/errors.js";
@@ -9,6 +10,7 @@ import { appendEvent, readEvents } from "../ledger/store.js";
 import { assertWindowsAllow, snapshotAll } from "../ledger/windows.js";
 import { forwardJson } from "../providers/forward.js";
 import {
+  applyReasoning,
   asRecord,
   extractSseUsage,
   extractUsage,
@@ -17,7 +19,11 @@ import {
   rewriteResponseModel,
   translateBody,
 } from "../providers/translate.js";
-import { extractHarness, extractIntent } from "../routing/intent.js";
+import {
+  extractHarness,
+  extractIntent,
+  extractProviderModelLevel,
+} from "../routing/intent.js";
 import { resolveRoute } from "../routing/resolve.js";
 
 export interface ProxyContext {
@@ -100,10 +106,8 @@ export async function handleHttp(
 
   const started = ctx.now();
   const inboundModel = typeof body.model === "string" ? body.model : null;
-  const intent = extractIntent({
-    config: ctx.config,
+  const providerModelLevel = extractProviderModelLevel({
     headers: req.headers,
-    queryIntent: url.searchParams.get("intent"),
     model: inboundModel,
   });
   const harness = extractHarness(req.headers);
@@ -112,6 +116,88 @@ export async function handleHttp(
   try {
     const events = readEvents(ctx.home);
     const warnings = assertWindowsAllow(ctx.config, snapshotAll(events, started));
+
+    if (providerModelLevel) {
+      const catalogRoute = resolveCatalogRoute(
+        CATALOG,
+        providerModelLevel.provider,
+        providerModelLevel.model,
+        providerModelLevel.level ?? null,
+      );
+      const translated = translateBody(
+        body,
+        protocol,
+        catalogRoute.plan.protocol,
+        catalogRoute.model.id,
+      );
+      const outgoing = applyReasoning(translated.body, catalogRoute.reasoning);
+      const upstream = await forwardJson({
+        plan: catalogRoute.plan,
+        path: translated.path,
+        body: outgoing,
+        protocol: catalogRoute.plan.protocol,
+        stream: streamed,
+        env: ctx.env,
+        home: ctx.home,
+        fetchImpl: ctx.fetchImpl,
+      });
+      const usage = streamed
+        ? extractSseUsage(upstream.body)
+        : extractUsage(parseJson(upstream.body));
+      const estimatedPrompt =
+        usage.promptTokens ||
+        estimateTokensFromText(JSON.stringify(body.messages ?? body.input ?? ""));
+      const estimatedCompletion =
+        usage.completionTokens ||
+        estimateTokensFromText(extractOutputText(upstream.body));
+      record(ctx, {
+        intent: catalogRoute.model.id,
+        plan: catalogRoute.plan.id,
+        model: catalogRoute.model.id,
+        provider: catalogRoute.provider.id,
+        level: catalogRoute.level,
+        protocol: catalogRoute.plan.protocol,
+        harness,
+        promptTokens: estimatedPrompt,
+        completionTokens: estimatedCompletion,
+        status: upstream.status,
+        latencyMs: ctx.now().getTime() - started.getTime(),
+        streamed,
+        error: upstream.status >= 400 ? truncate(upstream.body) : null,
+      });
+      writeCors(res);
+      res.writeHead(upstream.status, {
+        "content-type": streamed
+          ? (upstream.headers.get("content-type") ?? "text/event-stream")
+          : "application/json",
+        "x-modelpatrol-provider": catalogRoute.provider.id,
+        "x-modelpatrol-model": catalogRoute.model.id,
+        "x-modelpatrol-level": catalogRoute.level,
+        "x-modelpatrol-warnings":
+          warnings.map((w) => `${w.window}:${w.reason}`).join(",") || "",
+      });
+      if (streamed) {
+        res.end(upstream.body);
+        return;
+      }
+      const parsed = parseJson(upstream.body);
+      res.end(
+        JSON.stringify(
+          rewriteResponseModel(
+            parsed ?? { raw: upstream.body },
+            inboundModel ?? catalogRoute.model.id,
+          ),
+        ),
+      );
+      return;
+    }
+
+    const intent = extractIntent({
+      config: ctx.config,
+      headers: req.headers,
+      queryIntent: url.searchParams.get("intent"),
+      model: inboundModel,
+    });
     const route = resolveRoute(ctx.config, intent);
     const translated = translateBody(body, protocol, route.plan.protocol, route.model);
     const upstream = await forwardJson({
@@ -137,6 +223,8 @@ export async function handleHttp(
       intent,
       plan: route.plan.id,
       model: route.model,
+      provider: null,
+      level: null,
       protocol: route.plan.protocol,
       harness,
       promptTokens: estimatedPrompt,
@@ -170,9 +258,11 @@ export async function handleHttp(
   } catch (err) {
     const mapped = toHttpError(err);
     record(ctx, {
-      intent,
+      intent: providerModelLevel ? providerModelLevel.model : (inboundModel ?? "build"),
       plan: "none",
-      model: inboundModel ?? intent,
+      model: inboundModel ?? providerModelLevel?.model ?? "build",
+      provider: providerModelLevel?.provider ?? null,
+      level: providerModelLevel?.level ?? null,
       protocol: protocol === "responses" ? "openai" : protocol,
       harness,
       promptTokens: 0,
@@ -222,6 +312,8 @@ function record(
     intent: string;
     plan: string;
     model: string;
+    provider: string | null;
+    level: string | null;
     protocol: LedgerEvent["protocol"];
     harness: string | null;
     promptTokens: number;
@@ -238,6 +330,8 @@ function record(
     intent: input.intent,
     plan: input.plan,
     model: input.model,
+    provider: input.provider,
+    level: input.level,
     protocol: input.protocol,
     harness: input.harness,
     promptTokens: input.promptTokens,
@@ -323,7 +417,10 @@ function toHttpError(err: unknown): { status: number; code: string; message: str
     const status =
       err.code === "WINDOW_EXCEEDED"
         ? 429
-        : err.code === "INTENT_UNKNOWN" || err.code === "PLAN_UNKNOWN"
+        : err.code === "INTENT_UNKNOWN" ||
+            err.code === "PLAN_UNKNOWN" ||
+            err.code === "PROVIDER_UNKNOWN" ||
+            err.code === "MODEL_UNKNOWN"
           ? 400
           : err.code === "PLAN_UNAUTHENTICATED"
             ? 401

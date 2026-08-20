@@ -21,6 +21,7 @@ export const planDefinitionSchema = z
     authEnvFallbacks: z.array(z.string().min(1)).default([]),
     defaultModel: z.string().min(1),
     extraHeaders: z.record(z.string(), z.string()).default({}),
+    oauthPlan: z.string().min(1).optional(),
   })
   .strict();
 
@@ -80,6 +81,8 @@ export const ledgerEventSchema = z
     intent: z.string().min(1),
     plan: z.string().min(1),
     model: z.string().min(1),
+    provider: z.string().nullable().default(null),
+    level: z.string().nullable().default(null),
     protocol: protocolSchema,
     harness: z.string().min(1).nullable(),
     promptTokens: z.number().nonnegative(),

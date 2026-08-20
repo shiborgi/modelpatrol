@@ -43,3 +43,9 @@ export type OnExceed = (typeof ON_EXCEED)[number];
 
 export const INTENT_HEADER = "x-modelpatrol-intent";
 export const HARNESS_HEADER = "x-modelpatrol-harness";
+export const PROVIDER_HEADER = "x-modelpatrol-provider";
+export const MODEL_HEADER = "x-modelpatrol-model";
+export const LEVEL_HEADER = "x-modelpatrol-level";
+
+export const LEVEL_IDS = ["default", "high", "max"] as const;
+export type LevelId = (typeof LEVEL_IDS)[number];

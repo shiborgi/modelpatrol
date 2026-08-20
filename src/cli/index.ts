@@ -7,6 +7,7 @@ import { ZodError } from "zod";
 
 import { deleteCredential, inspectCredential, writeCredential } from "../auth/store.js";
 import { pollDeviceCodeToken, requestDeviceCode } from "../auth/xai-oauth.js";
+import { CATALOG, resolveCatalogRoute } from "../catalog/catalog.js";
 import { loadConfig, writeDefaultConfig } from "../config/load.js";
 import { ModelpatrolError } from "../core/errors.js";
 import type { CliResult } from "../core/model.js";
@@ -42,14 +43,15 @@ Usage:
 Commands:
   init                 Write the default config under --home
   doctor               Check config, plan keys, and process state
+  catalog              List providers, models, and their levels
   connect --plan ID    Connect a plan (supergrok) via device authorization
   disconnect --plan ID Remove stored credential for a plan
   start                Start the local proxy
   stop                 Stop a detached proxy
   status               Show process and listen address
   usage                Print rolling 5h / 7d / 30d windows
-  resolve --intent ID  Show the plan and model for an intent
-  env --intent ID      Print harness environment exports
+  resolve              Show targets for --intent or --provider/--model
+  env                  Print harness exports for --intent or --provider/--model
 
 Options:
   --home DIR           State directory (default: ~/.modelpatrol)
@@ -59,6 +61,9 @@ Options:
   --plan ID            Plan id for connect/disconnect
   --no-browser         Do not open browser during connect
   --intent ID          Intent id for resolve/env
+  --provider ID        Provider id for resolve/env
+  --model ID           Model id for resolve/env
+  --level ID           Level (default|high|max) for resolve/env
   --help, -h           Show this help
   --version, -v        Print the version
 `;
@@ -135,6 +140,8 @@ async function dispatch(args: string[], deps: CliDeps): Promise<CliResult> {
       return runStatus(opts);
     case "usage":
       return runUsage(opts);
+    case "catalog":
+      return runCatalog();
     case "resolve":
       return runResolve(opts);
     case "env":
@@ -294,10 +301,58 @@ function runUsage(opts: Map<string, string>): CliResult {
   });
 }
 
+function runCatalog(): CliResult {
+  const providers = Object.values(CATALOG).map((provider) => ({
+    id: provider.id,
+    label: provider.label,
+    baseUrl: provider.baseUrl,
+    models: provider.models.map((model) => ({
+      id: model.id,
+      levels: model.levels.map((level) => ({
+        id: level.id,
+        reasoning: level.reasoning,
+      })),
+    })),
+  }));
+  return okJson({ providers });
+}
+
+function catalogResolve(
+  opts: Map<string, string>,
+): { kind: "catalog"; baseOutput: Record<string, unknown> } | null {
+  const provider = opts.get("--provider");
+  const model = opts.get("--model");
+  if (!provider && !model) {
+    return null;
+  }
+  if (!provider || !model) {
+    throw new ModelpatrolError("USAGE", "--provider and --model must be used together");
+  }
+  const level = opts.get("--level");
+  const route = resolveCatalogRoute(CATALOG, provider, model, level ?? null);
+  return {
+    kind: "catalog",
+    baseOutput: {
+      provider: route.provider.id,
+      model: route.model.id,
+      level: route.level,
+      reasoning: route.reasoning,
+      baseUrl: route.plan.baseUrl,
+    },
+  };
+}
+
 function runResolve(opts: Map<string, string>): CliResult {
+  const catalog = catalogResolve(opts);
+  if (catalog) {
+    return okJson(catalog.baseOutput);
+  }
   const intent = opts.get("--intent");
   if (!intent) {
-    throw new ModelpatrolError("USAGE", "missing --intent");
+    throw new ModelpatrolError(
+      "USAGE",
+      "missing --intent (or --provider with --model)",
+    );
   }
   const loaded = loadConfig(optionalHome(opts));
   const route = resolveRoute(loaded.config, intent);
@@ -315,13 +370,37 @@ function runResolve(opts: Map<string, string>): CliResult {
 }
 
 function runEnv(opts: Map<string, string>): CliResult {
+  const loaded = loadConfig(optionalHome(opts));
+  const base = `http://${loaded.config.host}:${loaded.config.port}`;
+  const provider = opts.get("--provider");
+  const model = opts.get("--model");
+  if (provider || model) {
+    const catalog = catalogResolve(opts);
+    if (!catalog) {
+      throw new ModelpatrolError(
+        "USAGE",
+        "--provider and --model must be used together",
+      );
+    }
+    const lines = [
+      `export OPENAI_BASE_URL=${base}/v1`,
+      `export ANTHROPIC_BASE_URL=${base}`,
+      "export OPENAI_API_KEY=modelpatrol",
+      "export ANTHROPIC_API_KEY=modelpatrol",
+      `export MODELPATROL_PROVIDER=${catalog.baseOutput.provider}`,
+      `export MODELPATROL_MODEL=${catalog.baseOutput.model}`,
+      `export MODELPATROL_LEVEL=${catalog.baseOutput.level}`,
+    ];
+    return ok(`${lines.join("\n")}\n`);
+  }
   const intent = opts.get("--intent");
   if (!intent) {
-    throw new ModelpatrolError("USAGE", "missing --intent");
+    throw new ModelpatrolError(
+      "USAGE",
+      "missing --intent (or --provider with --model)",
+    );
   }
-  const loaded = loadConfig(optionalHome(opts));
   const route = resolveRoute(loaded.config, intent);
-  const base = `http://${loaded.config.host}:${loaded.config.port}`;
   const lines = [
     `export OPENAI_BASE_URL=${base}/v1`,
     `export ANTHROPIC_BASE_URL=${base}`,

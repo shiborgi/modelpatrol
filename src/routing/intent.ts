@@ -1,4 +1,11 @@
-import { CODE_INTENTS, HARNESS_HEADER, INTENT_HEADER } from "../core/constants.js";
+import {
+  CODE_INTENTS,
+  HARNESS_HEADER,
+  INTENT_HEADER,
+  LEVEL_HEADER,
+  MODEL_HEADER,
+  PROVIDER_HEADER,
+} from "../core/constants.js";
 import type { Config } from "../core/model.js";
 
 export function headerValue(
@@ -41,4 +48,44 @@ export function extractHarness(
 
 export function isKnownIntentName(value: string): boolean {
   return (CODE_INTENTS as readonly string[]).includes(value);
+}
+
+export interface ProviderModelLevel {
+  provider: string;
+  model: string;
+  level?: string;
+}
+
+export function parseModelSlug(model: string): ProviderModelLevel | null {
+  const parts = model.split("/").filter((part) => part.length > 0);
+  if (parts.length < 2) {
+    return null;
+  }
+  const [provider, modelId, level] = parts as [string, string, string | undefined];
+  return {
+    provider,
+    model: modelId,
+    ...(level ? { level } : {}),
+  };
+}
+
+export function extractProviderModelLevel(input: {
+  headers: Record<string, string | string[] | undefined>;
+  model?: string | null;
+}): ProviderModelLevel | null {
+  const provider = headerValue(input.headers, PROVIDER_HEADER)?.trim();
+  const modelHeader = headerValue(input.headers, MODEL_HEADER)?.trim();
+  if (provider && modelHeader) {
+    const level = headerValue(input.headers, LEVEL_HEADER)?.trim();
+    return {
+      provider,
+      model: modelHeader,
+      ...(level ? { level } : {}),
+    };
+  }
+  const bodyModel = input.model?.trim();
+  if (bodyModel?.includes("/")) {
+    return parseModelSlug(bodyModel);
+  }
+  return null;
 }
