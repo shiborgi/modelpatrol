@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ModelPatrol · LLM control</title><link rel="stylesheet" href="/style.css"><script type="module" src="/dashboard.js"></script></head>
+<body>
+<aside id="sidebar"><div class="sidebar-head"><a class="brand" href="/">◈ ModelPatrol</a><button id="sidebar-toggle" type="button" aria-label="Toggle sidebar" aria-expanded="true">☰</button></div><p>LLM CONTROL PLANE</p><nav><a href="#limits">Subscription limits</a><a href="#overview">Overview</a><a href="#requests">Request explorer</a></nav><small>Patrol Protocol 1.0<br>Local observability</small></aside>
+<main><header><div><span class="eyebrow">WORKSPACE / OBSERVABILITY</span><h1>Every call. Accounted for.</h1><p>Understand model usage, routing decisions and spend.</p></div><span class="badge" id="mode-badge">MODEL GATEWAY</span></header>
+<p><span id="status" role="status">Local network.</span></p>
+<section id="limits"><h2>Subscription limits</h2><p>Limits and reset times are shown only when the provider exposes them.</p><div class="table" id="usage-table"></div></section>
+<section id="overview"><form id="filters"><label>Group by<select id="group"><option>model</option><option>provider</option><option>step</option><option>agent</option><option>profile</option><option>harness</option><option>project</option></select></label><label>From<input type="datetime-local" id="from"></label><label>To<input type="datetime-local" id="to"></label><label>Run ID<input id="run" placeholder="All runs"></label><button>Refresh</button><button type="button" id="export">Export JSONL</button></form>
+<div class="cards" id="cards"></div><h2>Usage breakdown</h2><p id="coverage"></p><div class="table" id="metrics"></div></section>
+<section id="requests"><h2>Request explorer</h2><p>Select a request to inspect its route, attempts and session metadata.</p><div class="table" id="request-table"></div><pre id="detail" tabindex="0">No request selected.</pre></section>
+<footer>Costs are configured estimates, not provider invoices. Missing usage is shown as unknown.</footer></main>
+</body></html>

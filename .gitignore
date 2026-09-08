@@ -1,0 +1,7 @@
+node_modules/
+.modelpatrol/
+deploy/apple-container.env
+deploy/local.env
+/modelpatrol.json
+*.tgz
+.env

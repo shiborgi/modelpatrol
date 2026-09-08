@@ -1,0 +1,46 @@
+{
+  "name": "modelpatrol",
+  "version": "1.0.0",
+  "description": "Local-first LLM gateway, metadata routing and usage observability for Patrol.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shiborgi/modelpatrol.git"
+  },
+  "homepage": "https://github.com/shiborgi/modelpatrol#readme",
+  "bugs": {
+    "url": "https://github.com/shiborgi/modelpatrol/issues"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "modelpatrol": "./bin/modelpatrol.js"
+  },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./opencode": "./integrations/opencode.mjs",
+    "./pi": "./integrations/pi.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "integrations",
+    "examples",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "start": "node bin/modelpatrol.js serve --config modelpatrol.json",
+    "start:local": "node bin/modelpatrol.js serve --config deploy/modelpatrol.local.json",
+    "test": "node --test test/*.test.mjs",
+    "verify": "node scripts/check.mjs && npm test",
+    "release-check": "node scripts/package-smoke.mjs"
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "protocolVersion": "1.0",
+  "host": "127.0.0.1",
+  "port": 4318,
+  "dataDir": ".modelpatrol",
+  "gatewayKeyEnv": "MODELPATROL_API_KEY",
+  "providers": {
+    "anthropic": {
+      "preset": "anthropic",
+      "plan": { "kind": "metered", "name": "Anthropic API" }
+    },
+    "codex": {
+      "preset": "codex",
+      "plan": { "kind": "metered", "name": "OpenAI API — Codex models" }
+    },
+    "ollama-cloud": {
+      "preset": "ollama-cloud",
+      "usageAdapter": "ollama",
+      "plan": {
+        "kind": "subscription",
+        "name": "Ollama Cloud — set your plan fee"
+      }
+    },
+    "grok": {
+      "preset": "grok",
+      "plan": { "kind": "metered", "name": "xAI API" }
+    },
+    "opencode": {
+      "preset": "opencode",
+      "plan": { "kind": "metered", "name": "OpenCode Zen" }
+    }
+  },
+  "models": [
+    {
+      "id": "anthropic/sonnet",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "apis": ["messages", "chat"],
+      "capabilities": ["tools", "vision"],
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "quality": 0.9
+    },
+    {
+      "id": "codex/coder",
+      "provider": "codex",
+      "model": "gpt-5.1-codex",
+      "apis": ["responses"],
+      "capabilities": ["tools", "vision", "reasoning", "json"],
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "quality": 0.95
+    },
+    {
+      "id": "ollama-cloud/coder",
+      "provider": "ollama-cloud",
+      "model": "gpt-oss:120b",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.7
+    },
+    {
+      "id": "grok/coder",
+      "provider": "grok",
+      "model": "grok-code-fast-1",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.8
+    },
+    {
+      "id": "opencode/coder",
+      "provider": "opencode",
+      "model": "big-pickle",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.7
+    }
+  ],
+  "routing": {
+    "defaultModel": "ollama-cloud/coder",
+    "rules": [
+      {
+        "id": "implementation",
+        "match": { "step": "build", "agent": "developer" },
+        "models": ["codex/coder", "anthropic/sonnet"]
+      },
+      {
+        "id": "review",
+        "match": { "agent": "qa" },
+        "models": ["anthropic/sonnet", "grok/coder"]
+      },
+      {
+        "id": "frontend",
+        "match": { "profile": "react" },
+        "models": ["anthropic/sonnet"]
+      }
+    ],
+    "fallbacks": ["grok/coder", "opencode/coder"]
+  },
+  "cache": { "ttlMs": 0, "maxEntries": 100 },
+  "limits": {
+    "timeoutMs": 120000,
+    "requestsPerMinute": 120,
+    "maxConcurrent": 16
+  }
+}

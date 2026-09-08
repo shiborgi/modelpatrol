@@ -1,0 +1,123 @@
+{
+  "protocolVersion": "1.0",
+  "host": "0.0.0.0",
+  "port": 4318,
+  "dataDir": "../.modelpatrol",
+  "gatewayKeyEnv": "MODELPATROL_API_KEY",
+  "providers": {
+    "codex-subscription": {
+      "auth": "none",
+      "transport": { "kind": "harness", "adapter": "codex", "workspaceEnv": "MODELPATROL_CODEX_WORKSPACE" },
+      "plan": { "kind": "subscription", "name": "ChatGPT Codex" }
+    },
+    "claude-subscription": {
+      "auth": "none",
+      "transport": { "kind": "harness", "adapter": "claude", "workspaceEnv": "MODELPATROL_CLAUDE_WORKSPACE" },
+      "plan": { "kind": "subscription", "name": "Claude Pro" }
+    },
+    "opencode-go": {
+      "auth": "none",
+      "transport": { "kind": "harness", "adapter": "opencode", "workspaceEnv": "MODELPATROL_OPENCODE_WORKSPACE" },
+      "plan": { "kind": "subscription", "name": "OpenCode Go" }
+    },
+    "ollama-subscription": {
+      "preset": "ollama-cloud",
+      "usageAdapter": "ollama",
+      "plan": { "kind": "subscription", "name": "Ollama Cloud" }
+    },
+    "grok-subscription": {
+      "auth": "none",
+      "transport": { "kind": "harness", "adapter": "grok", "workspaceEnv": "MODELPATROL_GROK_WORKSPACE" },
+      "plan": { "kind": "subscription", "name": "Grok Build" }
+    },
+    "antigravity-subscription": {
+      "auth": "none",
+      "transport": { "kind": "harness", "adapter": "antigravity", "workspaceEnv": "MODELPATROL_ANTIGRAVITY_WORKSPACE" },
+      "plan": { "kind": "subscription", "name": "Antigravity" }
+    }
+  },
+  "models": [
+    {
+      "id": "codex/coder",
+      "provider": "codex-subscription",
+      "model": "gpt-5.6-terra",
+      "apis": ["responses"],
+      "capabilities": ["tools", "reasoning"],
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "quality": 0.95
+    },
+    {
+      "id": "claude/coder",
+      "provider": "claude-subscription",
+      "model": "sonnet",
+      "apis": ["messages"],
+      "capabilities": ["tools"],
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "quality": 0.9
+    },
+    {
+      "id": "opencode/coder",
+      "provider": "opencode-go",
+      "model": "gpt-5.6-luna",
+      "apis": ["responses"],
+      "capabilities": ["tools", "reasoning"],
+      "contextWindow": 272000,
+      "maxOutputTokens": 32768,
+      "quality": 0.85
+    },
+    {
+      "id": "ollama/coder",
+      "provider": "ollama-subscription",
+      "model": "deepseek-v4-pro:0813",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.7
+    },
+    {
+      "id": "grok/coder",
+      "provider": "grok-subscription",
+      "model": "grok-4.6",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.8
+    },
+    {
+      "id": "antigravity/coder",
+      "provider": "antigravity-subscription",
+      "model": "claude-sonnet-4-6",
+      "apis": ["chat"],
+      "capabilities": ["tools"],
+      "contextWindow": 65536,
+      "maxOutputTokens": 8192,
+      "quality": 0.9
+    }
+  ],
+  "routing": {
+    "defaultModel": "codex/coder",
+    "rules": [
+      {
+        "id": "implementation",
+        "match": { "step": "build", "agent": "developer" },
+        "models": ["codex/coder", "claude/coder", "opencode/coder"]
+      },
+      {
+        "id": "review",
+        "match": { "agent": "qa" },
+        "models": ["claude/coder", "antigravity/coder", "codex/coder"]
+      },
+      {
+        "id": "planning",
+        "match": { "step": "plan" },
+        "models": ["claude/coder", "opencode/coder", "codex/coder"]
+      }
+    ],
+    "fallbacks": ["ollama/coder", "grok/coder", "antigravity/coder"]
+  },
+  "limits": { "timeoutMs": 120000, "requestsPerMinute": 120, "maxConcurrent": 8 }
+}
