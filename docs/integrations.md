@@ -8,15 +8,16 @@ Add this optional section to the existing **CodePatrol** config:
     "baseUrl": "http://127.0.0.1:4318",
     "model": "auto",
     "apiKeyEnv": "MODELPATROL_API_KEY",
-    "harness": "opencode",
+    "harness": "pi",
     "api": "chat",
     "project": "my-project"
   }
 }
 ```
 
-Keep your explicit trusted `executor` and `verification` commands. This section
-does not replace them. It injects `MODELPATROL_BASE_URL`, `MODELPATROL_MODEL`,
+Use CodePatrol's packaged `codepatrol-pi-executor` or another explicit trusted
+executor, plus an explicit verification command. The ModelPatrol section injects
+`MODELPATROL_BASE_URL`, `MODELPATROL_MODEL`,
 `MODELPATROL_API`, `MODELPATROL_API_KEY_ENV`, and `MODELPATROL_HEADERS` into the
 stage executor process. Credentials remain in the inherited environment.
 The executor must launch the selected harness with that environment and load
@@ -35,7 +36,7 @@ installation at implementation time was 1.18.29). Install the ModelPatrol packag
 or reference its absolute file URL in the harness configuration:
 
 ```json
-{"plugin":["file:///absolute/path/modelpatrol/integrations/opencode.mjs"]}
+{"plugin":["file:///absolute/path/modelpatrol/integrations/opencode/index.mjs"]}
 ```
 
 Load this trusted config in each executor's OpenCode process. The plugin creates
@@ -51,19 +52,50 @@ candidate models; Codex Responses models cannot participate in a Chat-only pool.
 
 ## Pi
 
-Set `harness: "pi"` in CodePatrol. Launch Pi with the extension and model:
+Install the current official Pi package, then set `harness: "pi"` in CodePatrol:
 
 ```sh
-pi --extension /absolute/path/modelpatrol/integrations/pi.mjs \
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
+ModelPatrol exposes the installed extension path without requiring consumers to
+know its package layout:
+
+```sh
+modelpatrol integration-path pi
+```
+
+For an interactive entry point from any configured repository, install the local
+CodePatrol checkout once as a global Pi package:
+
+```sh
+pi install /absolute/path/to/codepatrol
+```
+
+After exporting the same `MODELPATROL_API_KEY` used by the CodePatrol config,
+start `pi` at the clean repository root and invoke `/patrol <feature>`. The
+interactive command launches the complete gated workflow; stage subprocesses
+receive only CodePatrol's structured completion tool, not the `/patrol` command.
+
+For a direct diagnostic launch:
+
+```sh
+pi --extension /absolute/path/modelpatrol/integrations/pi/index.mjs \
   --provider modelpatrol --model auto
 ```
 
-The adapter uses the documented `registerProvider` extension API. It creates a
+The adapter lives in the harness-specific `integrations/pi/` module and uses the
+documented `registerProvider` extension API. It creates a
 text model with conservative 32K context/4K output settings; adjust those
 declarations to your configured routing pool when adding vision/reasoning.
 Numeric cost fields required by Pi are placeholders; ModelPatrol SQLite is
-the accounting source. The Pi package is not installed or bundled here; adapter
-tests exercise its registration contract with a fixture, not a live Pi process.
+the accounting source. The Pi package is installed separately and is not bundled
+with ModelPatrol.
+
+Pi normally consumes an SSE response. A selected local subscription harness is
+still non-streaming internally; ModelPatrol waits for its complete Chat response
+and emits one valid buffered SSE turn. This compatibility boundary never reports
+incremental latency or usage that the underlying harness did not provide.
 
 ## Process isolation and trust
 

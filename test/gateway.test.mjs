@@ -13,9 +13,9 @@ import {
   extractUsage,
 } from "../src/index.mjs";
 import { StreamMeter } from "../src/usage.mjs";
-import { getHarness } from "../src/harnesses.mjs";
-import opencode from "../integrations/opencode.mjs";
-import piExtension from "../integrations/pi.mjs";
+import { getHarness, harnessChatSse } from "../src/harnesses.mjs";
+import opencode from "../integrations/opencode/index.mjs";
+import piExtension from "../integrations/pi/index.mjs";
 
 const env = {
   MODELPATROL_API_KEY: "test-gateway-secret-123",
@@ -167,6 +167,27 @@ test("central harness registry exposes the complete adapter contract", () => {
     assert.equal(adapter.capabilities().streaming, false);
   }
   assert.throws(() => getHarness("unknown"), /Unknown harness adapter/);
+});
+
+test("completed local Chat harness results become honest buffered SSE", () => {
+  const text = harnessChatSse({
+    id: "harness-1",
+    created: 1,
+    model: "fixture",
+    choices: [
+      { message: { role: "assistant", content: "done" }, finish_reason: "stop" },
+    ],
+  });
+  const meter = new StreamMeter("chat");
+  meter.push(new TextEncoder().encode(text));
+  assert.equal(meter.complete, true);
+  const payloads = text
+    .split("\n")
+    .filter((line) => line.startsWith("data: {"))
+    .map((line) => JSON.parse(line.slice(6)));
+  assert.equal(payloads[0].choices[0].delta.content, "done");
+  assert.equal(payloads[1].choices[0].finish_reason, "stop");
+  assert.equal(payloads[1].usage, undefined);
 });
 
 test("auto matches profiles, explicit pins model, protocol/capability constraints take priority", () => {

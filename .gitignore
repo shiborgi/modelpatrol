@@ -5,3 +5,5 @@ deploy/local.env
 /modelpatrol.json
 *.tgz
 .env
+.codepatrol/
+.memorypatrol/

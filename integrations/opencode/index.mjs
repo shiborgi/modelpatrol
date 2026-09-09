@@ -1,4 +1,4 @@
-import { harnessSettings } from "./environment.mjs";
+import { harnessSettings } from "../environment.mjs";
 
 /** OpenCode 1.x plugin. Use one harness process per CodePatrol stage. */
 export default async function modelpatrolPlugin() {

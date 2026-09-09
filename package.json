@@ -20,8 +20,8 @@
   },
   "exports": {
     ".": "./src/index.mjs",
-    "./opencode": "./integrations/opencode.mjs",
-    "./pi": "./integrations/pi.mjs",
+    "./opencode": "./integrations/opencode/index.mjs",
+    "./pi": "./integrations/pi/index.mjs",
     "./package.json": "./package.json"
   },
   "files": [

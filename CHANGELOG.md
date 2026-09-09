@@ -2,6 +2,12 @@
 
 ## 1.0.0
 
+- Document global CodePatrol Pi package installation and the interactive `/patrol` entry point.
+
+- Organize OpenCode and Pi integrations as independent harness modules.
+- Expose `modelpatrol integration-path` for portable executor discovery.
+- Bridge completed local Chat harness responses to honest buffered SSE for Pi.
+
 - Add independent Patrol gateway with explicit and metadata-driven model routing.
 - Add native Chat Completions, Responses and Messages transport with SSE accounting.
 - Add five provider presets, plan metadata, SQLite usage history and local dashboard.

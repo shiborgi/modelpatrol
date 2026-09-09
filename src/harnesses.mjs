@@ -170,3 +170,33 @@ export async function invokeHarness(provider, api, body, { env = process.env, si
     if (temporary) await rm(temporary, { recursive: true, force: true });
   }
 }
+
+/** Convert a completed local Chat harness response into one buffered SSE turn. */
+export function harnessChatSse(result) {
+  const choice = result?.choices?.[0];
+  const text = choice?.message?.content;
+  if (typeof text !== "string" || !text)
+    throw new Error("Harness Chat response has no assistant text");
+  const base = {
+    id: result.id,
+    object: "chat.completion.chunk",
+    created: result.created,
+    model: result.model,
+  };
+  const content = {
+    ...base,
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant", content: text },
+        finish_reason: null,
+      },
+    ],
+  };
+  const completed = {
+    ...base,
+    choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    ...(result.usage ? { usage: result.usage } : {}),
+  };
+  return `data: ${JSON.stringify(content)}\n\ndata: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`;
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const VERSION = "1.0.0";
 const HELP = `ModelPatrol ${VERSION} (Node.js 22.13+)
@@ -8,6 +9,7 @@ const HELP = `ModelPatrol ${VERSION} (Node.js 22.13+)
 Usage:
   modelpatrol serve --config FILE   Start the centralized gateway and dashboard
   modelpatrol check --config FILE   Validate a closed Patrol 1.0 configuration
+  modelpatrol integration-path pi   Print an installed harness extension path
   modelpatrol --help                Show help
   modelpatrol --version             Show version
 
@@ -20,13 +22,23 @@ try {
   } else if (["--version", "version"].includes(command)) {
     if (args.length) throw new Error("Version does not accept arguments");
     console.log(VERSION);
+  } else if (command === "integration-path") {
+    if (args.length !== 1 || !["opencode", "pi"].includes(args[0]))
+      throw new Error("Use integration-path opencode|pi");
+    console.log(
+      fileURLToPath(
+        new URL(`../integrations/${args[0]}/index.mjs`, import.meta.url),
+      ),
+    );
   } else {
     if (
       !["serve", "check"].includes(command) ||
       args.length !== 2 ||
       args[0] !== "--config"
     )
-      throw new Error("Use serve|check --config FILE, --help or --version");
+      throw new Error(
+        "Use serve|check --config FILE, integration-path opencode|pi, --help or --version",
+      );
     const [{ loadConfig }, { createGateway }] = await Promise.all([
       import("../src/config.mjs"),
       import("../src/server.mjs"),

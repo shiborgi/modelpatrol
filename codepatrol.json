@@ -1,0 +1,28 @@
+{
+  "protocolVersion": "1.0",
+  "providers": {
+    "agents": {
+      "catalog": ["agentpatrol", "catalog"],
+      "resolve": ["agentpatrol", "resolve"]
+    },
+    "context": ["contextpatrol", "query"]
+  },
+  "memorypatrol": {
+    "recall": ["memorypatrol", "recall"],
+    "remember": ["memorypatrol", "remember"],
+    "store": "codepatrol",
+    "budget": { "maxResults": 10, "maxBytes": 24000, "maxVisited": 500 }
+  },
+  "executor": ["codepatrol-pi-executor"],
+  "modelpatrol": {
+    "baseUrl": "http://127.0.0.1:4318",
+    "model": "auto",
+    "apiKeyEnv": "MODELPATROL_API_KEY",
+    "harness": "pi",
+    "api": "chat",
+    "project": "modelpatrol"
+  },
+  "verification": ["npm", "run", "verify"],
+  "limits": { "timeoutMs": 900000, "maxOutputBytes": 1048576 },
+  "telemetry": { "enabled": true }
+}

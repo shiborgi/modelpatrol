@@ -1,6 +1,6 @@
-import { harnessSettings } from "./environment.mjs";
+import { harnessSettings } from "../environment.mjs";
 
-/** Pi extension; selection is explicit via --provider modelpatrol --model auto. */
+/** Pi provider extension; selection is explicit through ModelPatrol. */
 export default function modelpatrolExtension(pi) {
   const settings = harnessSettings();
   const apis = {
@@ -23,7 +23,7 @@ export default function modelpatrolExtension(pi) {
         input: ["text"],
         contextWindow: 32768,
         maxTokens: 4096,
-        // Pi requires numeric rates. These placeholders are not accounting evidence.
+        // Pi requires numeric rates. ModelPatrol remains the accounting source.
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       },
     ],

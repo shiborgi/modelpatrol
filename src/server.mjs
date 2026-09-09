@@ -7,7 +7,7 @@ import { readMetadata, route } from "./routing.mjs";
 import { Store, summarize } from "./store.mjs";
 import { costFor, extractUsage, StreamMeter } from "./usage.mjs";
 import { centralUsage } from "./central-usage.mjs";
-import { getHarness, invokeHarness } from "./harnesses.mjs";
+import { getHarness, harnessChatSse, invokeHarness } from "./harnesses.mjs";
 
 function authorized(header, secret) {
   if (typeof header !== "string" || !secret) return false;
@@ -358,15 +358,34 @@ export function createGateway(
         if (reservation) event.budgetReservationUsd = reservation;
         // Persist before dispatch: process crashes must not erase in-flight spend reservations.
         await store.record(event);
-        const upstream = provider.transport.kind === "harness"
-          ? new Response(JSON.stringify(await invokeHarness(provider, api, payload, { env, signal: abort.signal })), { status: 200, headers: { "content-type": "application/json" } })
-          : await fetchImpl(provider.baseUrl + endpoints[api], {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-          signal: abort.signal,
-          redirect: "error",
-        });
+        let upstream;
+        if (provider.transport.kind === "harness") {
+          if (payload.stream)
+            check(api === "chat", "Buffered harness SSE currently requires Chat");
+          const result = await invokeHarness(
+            provider,
+            api,
+            { ...payload, stream: false },
+            { env, signal: abort.signal },
+          );
+          if (payload.stream) {
+            upstream = new Response(harnessChatSse(result), {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            });
+          } else
+            upstream = new Response(JSON.stringify(result), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+        } else
+          upstream = await fetchImpl(provider.baseUrl + endpoints[api], {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payload),
+            signal: abort.signal,
+            redirect: "error",
+          });
         attempt.status = upstream.status;
         // Only explicit rejection permits automatic fallback. Network ambiguity never retries a billable request.
         if (

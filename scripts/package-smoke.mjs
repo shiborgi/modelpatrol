@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -45,6 +45,17 @@ try {
     "1.0.0"
   )
     throw new Error("Installed package reported the wrong version");
+  const piExtension = run(
+    process.execPath,
+    [join(installed, "bin/modelpatrol.js"), "integration-path", "pi"],
+    dir,
+    true,
+  ).trim();
+  const expectedPiExtension = join(installed, "integrations/pi/index.mjs");
+  if ((await realpath(piExtension)) !== (await realpath(expectedPiExtension)))
+    throw new Error(
+      `Installed package reported the wrong Pi extension path: ${piExtension} != ${expectedPiExtension}`,
+    );
   run(
     process.execPath,
     [
