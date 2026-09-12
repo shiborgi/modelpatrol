@@ -85,22 +85,28 @@ pi --extension /absolute/path/modelpatrol/integrations/pi/index.mjs \
 ```
 
 The adapter lives in the harness-specific `integrations/pi/` module and uses the
-documented `registerProvider` extension API. It creates a
-text model with conservative 32K context/4K output settings; adjust those
-declarations to your configured routing pool when adding vision/reasoning.
-Numeric cost fields required by Pi are placeholders; ModelPatrol SQLite is
-the accounting source. The Pi package is installed separately and is not bundled
-with ModelPatrol.
+documented `registerProvider` extension API. It declares a text model with a
+64K context window and 4K max output so Pi's remaining-token budget matches the
+Chat routing pool in the example and local configs. Override with
+`MODELPATROL_CONTEXT_WINDOW` and `MODELPATROL_MAX_OUTPUT_TOKENS` when the pool
+differs, and raise those declarations if you add vision/reasoning. Numeric cost
+fields required by Pi are placeholders; ModelPatrol SQLite is the accounting
+source. The Pi package is installed separately and is not bundled with
+ModelPatrol.
 
-Pi normally consumes an SSE response. A selected local subscription harness is
-still non-streaming internally; ModelPatrol waits for its complete Chat response
-and emits one valid buffered SSE turn. This compatibility boundary never reports
-incremental latency or usage that the underlying harness did not provide.
+Pi consumes a native SSE response for every configured model. Codex, Claude,
+OpenCode, Grok and Antigravity translate their local streaming protocols into
+Chat content deltas; Ollama's OpenAI-compatible SSE is passed through. Only
+visible assistant text, terminal status and authoritative usage are forwarded.
+Tool inputs, outputs and reasoning are not forwarded, and a stream is never
+replayed after dispatch.
 
 ## Process isolation and trust
 
-Start a fresh harness process per CodePatrol stage. Do not reuse a shared
-OpenCode server or Pi session across concurrent runs: its environment would
-retain the previous stage's metadata. Harness plugins are executable trusted
+Start a fresh harness process per CodePatrol stage. Do not reuse a Pi session
+across concurrent runs: its environment would retain the previous stage's
+metadata. The OpenCode harness uses one `run --format json` subprocess per stage;
+ModelPatrol does not start or manage a separate connector listener. Harness
+plugins are executable trusted
 code. Pin their version/path with the executor. Metadata never grants review,
 verification or release authority; all existing CodePatrol gates remain active.

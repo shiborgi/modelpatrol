@@ -6,6 +6,7 @@ export const metadataFields = [
   "profile",
   "harness",
   "project",
+  "workspace",
   "run-id",
   "session-id",
   "trace-id",

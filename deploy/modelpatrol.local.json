@@ -41,7 +41,7 @@
       "id": "codex/coder",
       "provider": "codex-subscription",
       "model": "gpt-5.6-terra",
-      "apis": ["responses"],
+      "apis": ["chat", "responses"],
       "capabilities": ["tools", "reasoning"],
       "contextWindow": 200000,
       "maxOutputTokens": 8192,
@@ -51,7 +51,7 @@
       "id": "claude/coder",
       "provider": "claude-subscription",
       "model": "sonnet",
-      "apis": ["messages"],
+      "apis": ["chat", "messages"],
       "capabilities": ["tools"],
       "contextWindow": 200000,
       "maxOutputTokens": 8192,
@@ -60,11 +60,11 @@
     {
       "id": "opencode/coder",
       "provider": "opencode-go",
-      "model": "gpt-5.6-luna",
-      "apis": ["responses"],
+      "model": "muse-spark-1.3-contributor-free",
+      "apis": ["chat", "responses"],
       "capabilities": ["tools", "reasoning"],
-      "contextWindow": 272000,
-      "maxOutputTokens": 32768,
+      "contextWindow": 1048576,
+      "maxOutputTokens": 131072,
       "quality": 0.85
     },
     {
@@ -73,7 +73,7 @@
       "model": "deepseek-v4-pro:0813",
       "apis": ["chat"],
       "capabilities": ["tools"],
-      "contextWindow": 65536,
+      "contextWindow": 1000000,
       "maxOutputTokens": 8192,
       "quality": 0.7
     },
@@ -83,7 +83,7 @@
       "model": "grok-4.6",
       "apis": ["chat"],
       "capabilities": ["tools"],
-      "contextWindow": 65536,
+      "contextWindow": 1000000,
       "maxOutputTokens": 8192,
       "quality": 0.8
     },
@@ -93,7 +93,7 @@
       "model": "claude-sonnet-4-6",
       "apis": ["chat"],
       "capabilities": ["tools"],
-      "contextWindow": 65536,
+      "contextWindow": 1000000,
       "maxOutputTokens": 8192,
       "quality": 0.9
     }
@@ -112,12 +112,24 @@
         "models": ["claude/coder", "antigravity/coder", "codex/coder"]
       },
       {
+        "id": "spec",
+        "match": { "step": "spec" },
+        "models": ["antigravity/coder", "ollama/coder"]
+      },
+      {
         "id": "planning",
         "match": { "step": "plan" },
-        "models": ["claude/coder", "opencode/coder", "codex/coder"]
+        "models": [
+          "claude/coder",
+          "opencode/coder",
+          "codex/coder",
+          "grok/coder",
+          "ollama/coder",
+          "antigravity/coder"
+        ]
       }
     ],
     "fallbacks": ["ollama/coder", "grok/coder", "antigravity/coder"]
   },
-  "limits": { "timeoutMs": 120000, "requestsPerMinute": 120, "maxConcurrent": 8 }
+  "limits": { "timeoutMs": 600000, "requestsPerMinute": 120, "maxConcurrent": 8 }
 }

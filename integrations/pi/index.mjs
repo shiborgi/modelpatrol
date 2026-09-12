@@ -21,8 +21,8 @@ export default function modelpatrolExtension(pi) {
         name: `ModelPatrol ${settings.model}`,
         reasoning: false,
         input: ["text"],
-        contextWindow: 32768,
-        maxTokens: 4096,
+        contextWindow: settings.contextWindow,
+        maxTokens: settings.maxTokens,
         // Pi requires numeric rates. ModelPatrol remains the accounting source.
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       },

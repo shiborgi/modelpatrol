@@ -86,6 +86,11 @@
     "defaultModel": "ollama-cloud/coder",
     "rules": [
       {
+        "id": "spec",
+        "match": { "step": "spec" },
+        "models": ["grok/coder", "ollama-cloud/coder", "opencode/coder"]
+      },
+      {
         "id": "implementation",
         "match": { "step": "build", "agent": "developer" },
         "models": ["codex/coder", "anthropic/sonnet"]

@@ -34,8 +34,14 @@ export const presets = {
     auth: "bearer",
   },
 };
+export class GatewayError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "GatewayError";
+  }
+}
 export function check(value, message) {
-  if (!value) throw new Error(message);
+  if (!value) throw new GatewayError(message);
 }
 function object(value, keys, label) {
   check(

@@ -48,9 +48,11 @@ Rules are operator policy, not learned model-quality evidence.
 Native routes: `POST /v1/chat/completions`, `/v1/responses`, `/v1/messages`;
 `GET /v1/models` lists configured aliases. JSON and SSE are passed through with
 the upstream model ID. Tool calls and results remain in their original format.
-`auto` does **not** translate between incompatible protocols: a Responses-only
-Codex model requires a Responses client. Anthropic's Chat Completions compatibility
-has provider-documented limitations; use Messages for native Anthropic features.
+`auto` does **not** translate between incompatible direct HTTP protocols. Local
+subscription harnesses additionally expose a normalized Chat interface so Pi and
+CodePatrol can route one request across their different CLI protocols. Anthropic's
+direct Chat Completions compatibility has provider-documented limitations; use
+Messages for native Anthropic API features.
 Server-side conversations (`previous_response_id` or `conversation`) require an
 explicit model to keep provider-owned conversation state on the same endpoint.
 
@@ -59,7 +61,10 @@ explicit model to keep provider-owned conversation state on the same endpoint.
 Subscription-backed CLIs run inside the single ModelPatrol process through the
 [central harness contract](docs/harnesses.md). Each provider selects a registered
 adapter through `transport.kind: "harness"`; ModelPatrol owns routing and the
-adapter owns its local authenticated CLI session.
+adapter owns its local authenticated CLI session. Codex, Claude, Grok and
+Antigravity translate native partial events into Chat SSE. OpenCode forwards
+headless `run --format json` text records as soon as its CLI publishes them.
+Direct Ollama SSE passes through the same gateway without buffering.
 
 ## Lean local deployment
 

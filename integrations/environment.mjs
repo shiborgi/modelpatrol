@@ -33,5 +33,28 @@ export function harnessSettings(env = process.env) {
     api: env.MODELPATROL_API ?? "chat",
     headers,
     key,
+    contextWindow: optionalBound(
+      env,
+      "MODELPATROL_CONTEXT_WINDOW",
+      65536,
+      1024,
+      1_048_576,
+    ),
+    maxTokens: optionalBound(
+      env,
+      "MODELPATROL_MAX_OUTPUT_TOKENS",
+      4096,
+      1,
+      131_072,
+    ),
   };
+}
+
+function optionalBound(env, name, fallback, min, max) {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max)
+    throw new Error(`Invalid ${name}`);
+  return value;
 }

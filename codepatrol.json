@@ -1,5 +1,6 @@
 {
   "protocolVersion": "1.0",
+  "progress": { "detail": "safe" },
   "providers": {
     "agents": {
       "catalog": ["agentpatrol", "catalog"],
@@ -10,13 +11,14 @@
   "memorypatrol": {
     "recall": ["memorypatrol", "recall"],
     "remember": ["memorypatrol", "remember"],
+    "handoff": ["memorypatrol", "handoff"],
     "store": "codepatrol",
     "budget": { "maxResults": 10, "maxBytes": 24000, "maxVisited": 500 }
   },
   "executor": ["codepatrol-pi-executor"],
   "modelpatrol": {
     "baseUrl": "http://127.0.0.1:4318",
-    "model": "auto",
+    "model": "antigravity/coder",
     "apiKeyEnv": "MODELPATROL_API_KEY",
     "harness": "pi",
     "api": "chat",

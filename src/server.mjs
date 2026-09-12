@@ -2,13 +2,24 @@ import { createServer } from "node:http";
 import { randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { once } from "node:events";
-import { check, endpoints, validateConfig } from "./config.mjs";
+import { check, endpoints, GatewayError, validateConfig } from "./config.mjs";
 import { readMetadata, route } from "./routing.mjs";
 import { Store, summarize } from "./store.mjs";
 import { costFor, extractUsage, StreamMeter } from "./usage.mjs";
 import { centralUsage } from "./central-usage.mjs";
 import { getHarness, harnessChatSse, invokeHarness } from "./harnesses.mjs";
 
+function sanitizedFailure(error) {
+  if (error instanceof SyntaxError) return "Invalid JSON";
+  const message = error instanceof GatewayError ? error.message : "";
+  if (
+    message.length > 0 &&
+    message.length <= 200 &&
+    /^[A-Za-z0-9][A-Za-z0-9 _.:/-]*$/.test(message)
+  )
+    return message;
+  return "Request failed validation or provider execution";
+}
 function authorized(header, secret) {
   if (typeof header !== "string" || !secret) return false;
   const actual = Buffer.from(header);
@@ -361,18 +372,27 @@ export function createGateway(
         let upstream;
         if (provider.transport.kind === "harness") {
           if (payload.stream)
-            check(api === "chat", "Buffered harness SSE currently requires Chat");
+            check(api === "chat", "Harness streaming currently requires Chat");
           const result = await invokeHarness(
             provider,
             api,
-            { ...payload, stream: false },
-            { env, signal: abort.signal },
+            payload,
+            {
+              env,
+              signal: abort.signal,
+              workspace: event.metadata.workspace,
+              step: event.metadata.step,
+              timeoutMs: config.limits.timeoutMs,
+            },
           );
           if (payload.stream) {
-            upstream = new Response(harnessChatSse(result), {
-              status: 200,
-              headers: { "content-type": "text/event-stream" },
-            });
+            upstream =
+              result instanceof Response
+                ? result
+                : new Response(harnessChatSse(result), {
+                    status: 200,
+                    headers: { "content-type": "text/event-stream" },
+                  });
           } else
             upstream = new Response(JSON.stringify(result), {
               status: 200,
@@ -414,6 +434,15 @@ export function createGateway(
             upstream.headers.get("content-type")?.includes("text/event-stream"),
             "Expected SSE from provider",
           );
+          const reader = upstream.body.getReader();
+          let current;
+          try {
+            current = await reader.read();
+            check(!current.done, "Provider stream is empty");
+          } catch (error) {
+            await reader.cancel().catch(() => {});
+            throw error;
+          }
           res.writeHead(200, {
             "content-type": "text/event-stream",
             "cache-control": "no-cache",
@@ -422,7 +451,8 @@ export function createGateway(
           const meter = new StreamMeter(api);
           let bytes = 0;
           try {
-            for await (const chunk of upstream.body) {
+            while (!current.done) {
+              const chunk = current.value;
               bytes += chunk.length;
               check(
                 bytes <= config.limits.maxResponseBytes,
@@ -432,6 +462,7 @@ export function createGateway(
               meter.push(chunk);
               if (!res.write(chunk))
                 await once(res, "drain", { signal: abort.signal });
+              current = await reader.read();
             }
             check(
               meter.complete && !meter.failed,
@@ -439,6 +470,7 @@ export function createGateway(
             );
             event.status = "ok";
           } finally {
+            reader.releaseLock();
             event.usage = meter.usage;
             event.costUsd = costFor(event.usage, model, provider.plan);
           }
@@ -469,10 +501,11 @@ export function createGateway(
       }
     } catch (error) {
       event.status = abort.signal.aborted ? "aborted" : "error";
+      event.failure = abort.signal.aborted ? "Aborted" : sanitizedFailure(error);
       if (!res.headersSent)
         json(res, error instanceof SyntaxError ? 400 : 502, {
           error: {
-            message: "Request failed validation or provider execution",
+            message: event.failure,
             requestId: id,
           },
         });

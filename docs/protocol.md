@@ -39,7 +39,9 @@ or incompatible model fails, rather than fabricating execution.
 
 ModelPatrol stores local state in SQLite at `dataDir/usage.sqlite`. A process
 lock prevents multiple gateway instances from opening the same local database.
-Request bodies, responses, raw errors and credentials are not stored.
+Request bodies, responses, raw errors and credentials are not stored. Failed
+requests may record a sanitized gateway validation reason (`failure`); provider
+error text is never persisted or returned.
 
 ## Admin endpoints
 
@@ -77,6 +79,8 @@ when a CLI/provider does not expose quota. Fractions and reset times that are
 not reported must be `null`; adapters must not estimate them.
 
 Malformed/provider failures return sanitized errors. Incomplete/error SSE is
-terminated and recorded as failure. First-byte latency measures the initial
-SSE bytes, not guaranteed time to first generated token. Missing usage remains
-unknown. No raw provider errors are exposed or persisted.
+terminated and recorded as failure, with no retry after streaming begins.
+First-byte latency measures the first forwarded SSE content bytes. Native
+harness streams preserve terminal usage when the CLI reports it and never fabricate
+incremental data. Missing usage remains unknown. No raw provider errors are
+exposed or persisted.
